@@ -90,7 +90,7 @@ if (in_array($filterTipe, ['online', 'offline'])) {
          JOIN jenis_pengujian j ON b.jenis_pengujian_id = j.id
          JOIN users u ON b.user_id = u.id
          WHERE b.tipe_booking = ?
-         ORDER BY b.created_at DESC"
+         ORDER BY b.tanggal_pengujian_diminta ASC, b.created_at DESC"
     );
     $stmt->execute([$filterTipe]);
 } else {
@@ -99,7 +99,7 @@ if (in_array($filterTipe, ['online', 'offline'])) {
          FROM bookings b
          JOIN jenis_pengujian j ON b.jenis_pengujian_id = j.id
          JOIN users u ON b.user_id = u.id
-         ORDER BY b.created_at DESC"
+         ORDER BY b.tanggal_pengujian_diminta ASC, b.created_at DESC"
     );
 }
 $semuaBooking = $stmt->fetchAll();
