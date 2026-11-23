@@ -60,8 +60,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if (move_uploaded_file($_FILES['bukti_transfer']['tmp_name'], $tujuanFolder . '/' . $namaBaru)) {
                 $path = 'uploads/bukti_transfer/' . $namaBaru;
 
+                $oldBukti = $booking['bukti_transfer'] ?? '';
+                if ($oldBukti !== '' && $oldBukti !== $path && file_exists('../' . $oldBukti)) {
+                    unlink('../' . $oldBukti);
+                }
+
                 $stmtUpdate = $pdo->prepare(
-                    "UPDATE bookings SET bukti_transfer = ? WHERE id = ?"
+                    "UPDATE bookings SET bukti_transfer = ?, alasan_ditolak = NULL WHERE id = ?"
                 );
                 $stmtUpdate->execute([$path, $bookingId]);
 
@@ -95,6 +100,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="../assets/css/style.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-custom navbar-pelanggan">
@@ -126,6 +132,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         <?php if ($error): ?><div class="alert alert-danger"><?= htmlspecialchars($error) ?></div><?php endif; ?>
         <?php if ($success): ?><div class="alert alert-success"><?= htmlspecialchars($success) ?></div><?php endif; ?>
+        <?php if (!empty($booking['alasan_ditolak'])): ?>
+        <div class="alert alert-warning d-flex align-items-start gap-2" role="alert">
+            <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+            <div>
+                <strong>Bukti transfer sebelumnya ditolak oleh Admin.</strong>
+                <p class="mb-0 mt-1">Alasan: <?= htmlspecialchars($booking['alasan_ditolak']) ?></p>
+                <p class="mb-0 mt-2">Silakan perbaiki dan unggah ulang bukti transfer yang benar.</p>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <div class="card border-0 shadow-sm mb-3">
             <div class="card-header bg-white"><strong>Ringkasan Pembayaran</strong></div>

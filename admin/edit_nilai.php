@@ -119,6 +119,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_hasil'])) {
         }
     }
 
+    if ($error === '' && trim($_POST['objek'] ?? '') !== '' && !preg_match('/^[A-Za-z]/', trim($_POST['objek'] ?? ''))) {
+        $error = 'Obyek harus diawali dengan huruf. Angka hanya boleh setelah huruf.';
+    }
+
     if ($error === '' && $isTabelBeton) {
         $fieldTabel = ['tgl_cor','tgl_ditest','kode_beton','berat_kg','beban_maksimum','tegangan_tekan',
             'tegangan_tekan_28_hari','mpa','rata_rata','keterangan','catatan_teknisi','mutu_beton',
@@ -131,15 +135,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_hasil'])) {
         $hasilIdList = (array) ($_POST['hasil_id'] ?? []);
         $jmlUpdate = 0;
         $fileLamaDiganti = [];
+        $pdo->beginTransaction();
+        try {
         foreach ($hasilIdList as $i => $hid) {
             $cekHid = $pdo->prepare(
-                "SELECT hp.dokumentasi_file FROM hasil_pengujian hp
+                "SELECT hp.dokumentasi_file, hp.catatan_teknisi FROM hasil_pengujian hp
                  JOIN sampel s ON hp.sampel_id = s.id
                  WHERE hp.id = ? AND s.booking_id = ?"
             );
             $cekHid->execute([(int) $hid, $bookingId]);
             $rowHid = $cekHid->fetch();
             if (!$rowHid) { continue; }
+            $keteranganLama = $rowHid['catatan_teknisi'] ?? null;
             if ($dokumentasiPath && $rowHid['dokumentasi_file'] && $rowHid['dokumentasi_file'] !== $dokumentasiPath) {
                 $fileLamaDiganti[] = $rowHid['dokumentasi_file'];
             }
@@ -162,7 +169,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_hasil'])) {
                 $mpaNilai      = (($_POST['mpa'][$i] ?? '') ?: null);
                 $konvUmur28Mpa = (($_POST['konversi_umur28_mpa'][$i] ?? '') ?: null);
                 $tinggiL       = ($_POST['tinggi_l'][$i] ?? '') ?: null;
-                $keteranganBaris = trim($_POST['catatan_teknisi'][$i] ?? '') ?: ($catatanAdmin ?: null);
+                $keteranganBaris = trim($_POST['catatan_teknisi'][$i] ?? '') ?: ($catatanAdmin ?: ($keteranganLama ?: null));
                 $nilaiS = ($tegBendaUji ?: null);
                 $tegTekan = null; $teg28 = null; $rataRata = null;
                 $bentangL = $dimensiB = $dimensiH = $modulusSeksi = $momenLentur = $teganganLentur = null;
@@ -192,7 +199,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_hasil'])) {
                 // Kubus: kolom terakhir tabel adalah Keterangan (catatan_teknisi)
                 $keteranganBaris = $isKubus
                     ? (trim($_POST['keterangan'][$i] ?? '') ?: $catatanAdmin)
-                    : $catatanAdmin;
+                    : ($catatanAdmin ?: ($keteranganLama ?: null));
                 $nilaiS = $isKubus
                     ? (($teg28 ?: $tegTekan) ?: null)
                     : ($isPaving ? (($rataRata ?: ($teg28 ?: $tegTekan)) ?: null) : $mpaNilai);
@@ -226,6 +233,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_hasil'])) {
                 $paramsS[] = $bentangL; $paramsS[] = $dimensiB; $paramsS[] = $dimensiH;
                 $paramsS[] = $modulusSeksi; $paramsS[] = $momenLentur; $paramsS[] = $teganganLentur;
             }
+            if ($isPaving) {
+                // Paving/Bata Merah/Hebel: simpan perubahan Obyek
+                $sqlS .= ", objek=?";
+                $paramsS[] = trim($_POST['objek'] ?? '') ?: null;
+            }
             if ($dokumentasiPath) {
                 $sqlS .= ", dokumentasi_file=?";
                 $paramsS[] = $dokumentasiPath;
@@ -235,17 +247,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_hasil'])) {
             $pdo->prepare($sqlS)->execute($paramsS);
             $jmlUpdate++;
         }
-
-        foreach (array_unique($fileLamaDiganti) as $fl) {
-            if ($fl !== $dokumentasiPath && is_file('../' . $fl)) { @unlink('../' . $fl); }
+        $pdo->commit();
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('edit_nilai tabel gagal: ' . $e->getMessage());
+            $error = 'Gagal menyimpan perubahan. Silakan coba lagi.';
         }
 
-        if ($jmlUpdate === 0) {
-            $error = 'Tidak ada data hasil yang dapat diupdate pada booking ini.';
-        } else {
-            $success = "$jmlUpdate data berhasil diupdate.";
-            header("Location: edit_nilai.php?booking_id=$bookingId&msg=update");
-            exit;
+        if ($error === '') {
+            foreach (array_unique($fileLamaDiganti) as $fl) {
+                if ($fl !== $dokumentasiPath && is_file('../' . $fl)) {
+                    $cekShare = $pdo->prepare(
+                        "SELECT COUNT(*) FROM hasil_pengujian hp JOIN sampel s ON hp.sampel_id = s.id WHERE s.booking_id = ? AND hp.dokumentasi_file = ?"
+                    );
+                    $cekShare->execute([$bookingId, $fl]);
+                    if ((int) $cekShare->fetchColumn() === 0) {
+                        @unlink('../' . $fl);
+                    }
+                }
+            }
+
+            if ($jmlUpdate === 0) {
+                $error = 'Tidak ada data hasil yang dapat diupdate pada booking ini.';
+            } else {
+                header("Location: edit_nilai.php?booking_id=$bookingId&msg=update");
+                exit;
+            }
         }
     }
 
@@ -357,7 +384,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_hasil'])) {
     $pdo->prepare($sql)->execute($params);
 
     if ($fileLamaSatu && $fileLamaSatu !== $dokumentasiPath && is_file('../' . $fileLamaSatu)) {
-        @unlink('../' . $fileLamaSatu);
+        $cekShare = $pdo->prepare(
+            "SELECT COUNT(*) FROM hasil_pengujian hp JOIN sampel s ON hp.sampel_id = s.id WHERE s.booking_id = ? AND hp.dokumentasi_file = ?"
+        );
+        $cekShare->execute([$bookingId, $fileLamaSatu]);
+        if ((int) $cekShare->fetchColumn() === 0) {
+            @unlink('../' . $fileLamaSatu);
+        }
     }
 
     $success = 'Hasil pengujian berhasil diupdate.';
@@ -365,6 +398,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['update_hasil'])) {
     exit;
     }
     }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error !== '' && !empty($dokumentasiPath) && is_file('../' . $dokumentasiPath)) {
+    @unlink('../' . $dokumentasiPath);
 }
 
 if (isset($_GET['msg']) && $_GET['msg'] === 'update') $success = 'Hasil pengujian berhasil diupdate.';
@@ -482,6 +519,7 @@ if (isset($_GET['msg']) && $_GET['msg'] === 'update') $success = 'Hasil pengujia
                         <div class="col-12">
                             <label class="form-label fw-semibold">Obyek</label>
                             <input type="text" name="objek" class="form-control" placeholder="misal: Paving ( 10 x 20cm )"
+                                   pattern="[A-Za-z].*" title="Obyek harus diawali dengan huruf"
                                    value="<?= htmlspecialchars($semuaHasil[0]['objek'] ?? '') ?>">
                         </div>
                     </div>
@@ -660,6 +698,7 @@ if (isset($_GET['msg']) && $_GET['msg'] === 'update') $success = 'Hasil pengujia
                             <div class="col-sm-12 mb-3">
                                 <label class="form-label">Obyek <span class="text-danger">*</span></label>
                                 <input type="text" name="objek" class="form-control" required
+                                       pattern="[A-Za-z].*" title="Obyek harus diawali dengan huruf"
                                        placeholder="Obyek pengujian besi" value="<?= htmlspecialchars($h['objek'] ?? '') ?>">
                             </div>
                         </div>

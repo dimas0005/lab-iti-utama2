@@ -19,6 +19,10 @@ $stmt->execute([$bookingId]);
 $booking = $stmt->fetch();
 
 if (!$booking) {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+        header('Location: kelola_booking.php');
+        exit;
+    }
     die('Booking tidak ditemukan atau statusnya bukan "Menunggu Pembayaran".');
 }
 
@@ -31,7 +35,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['verifikasi_bayar'])) 
     if (!$isOffline && empty($booking['bukti_transfer'])) {
         $error = 'Pelanggan belum mengunggah bukti transfer. Verifikasi tidak dapat dilakukan.';
     } else {
-        $pdo->prepare("UPDATE bookings SET status_booking = 'selesai', diverifikasi_pembayaran_oleh = ?, tanggal_pembayaran = NOW(), bukti_transfer = NULL WHERE id = ?")
+        $pdo->prepare("UPDATE bookings SET status_booking = 'selesai', diverifikasi_pembayaran_oleh = ?, tanggal_pembayaran = NOW(), bukti_transfer = NULL, alasan_ditolak = NULL WHERE id = ?")
              ->execute([$user['id'], $bookingId]);
 
         $ket = $isOffline ? "Pembayaran di loket diverifikasi oleh Admin. Booking selesai." : "Pembayaran diverifikasi oleh Admin. Booking selesai.";

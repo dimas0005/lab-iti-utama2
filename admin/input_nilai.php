@@ -10,6 +10,8 @@ requireRole(['admin']);
 $user = currentUser($pdo);
 $success = '';
 $error = '';
+$objek = null;
+$keterangan = null;
 $bookingId = (int) ($_GET['booking_id'] ?? $_POST['booking_id'] ?? 0);
 
 $stmt = $pdo->prepare(
@@ -56,6 +58,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['simpan_hasil'])) {
 
     if (!csrf_check()) { die('Token CSRF tidak valid. Muat ulang halaman.'); }
 
+    // Validasi Obyek: wajib diawali huruf (angka hanya boleh menyusul)
+    $objekPost = trim($_POST['objek'] ?? '');
+    if ($error === '' && $objekPost !== '' && !preg_match('/^[A-Za-z]/', $objekPost)) {
+        $error = 'Obyek harus diawali dengan huruf.';
+    }
+
     $dokumentasiPath = null;
     if (isset($_FILES['dokumentasi']) && ($_FILES['dokumentasi']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
         if ($_FILES['dokumentasi']['error'] !== 0) {
@@ -82,17 +90,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['simpan_hasil'])) {
     }
 
     $fotoLama = null;
+    $sampelId = null;
     if ($error === '' && !empty($_POST['sampel_id'])) {
         $stFoto = $pdo->prepare("SELECT dokumentasi_file FROM hasil_pengujian WHERE sampel_id = ? ORDER BY id DESC LIMIT 1");
         $stFoto->execute([(int) $_POST['sampel_id']]);
         $fotoLama = $stFoto->fetchColumn() ?: null;
         if ($dokumentasiPath === null) { $dokumentasiPath = $fotoLama; }
     }
-    $hapusFotoLama = function () use ($fotoLama, $dokumentasiPath) {
-        if ($fotoLama !== null && $fotoLama !== $dokumentasiPath) { @unlink('../' . $fotoLama); }
+    if ($dokumentasiPath === null) {
+        $stFotoB = $pdo->prepare("SELECT hp.dokumentasi_file FROM hasil_pengujian hp JOIN sampel s ON hp.sampel_id = s.id WHERE s.booking_id = ? AND hp.dokumentasi_file IS NOT NULL ORDER BY hp.id DESC LIMIT 1");
+        $stFotoB->execute([$bookingId]);
+        $dokumentasiPath = $stFotoB->fetchColumn() ?: null;
+    }
+    $hapusFotoLama = function () use (&$fotoLama, &$dokumentasiPath, &$sampelId, $pdo, $bookingId) {
+        if ($fotoLama === null || $fotoLama === $dokumentasiPath) { return; }
+        $stShare = $pdo->prepare(
+            "SELECT COUNT(*) FROM hasil_pengujian hp JOIN sampel s ON hp.sampel_id = s.id
+             WHERE s.booking_id = ? AND hp.dokumentasi_file = ? AND hp.sampel_id != ?"
+        );
+        $stShare->execute([$bookingId, $fotoLama, (int) ($sampelId ?? 0)]);
+        if ((int) $stShare->fetchColumn() === 0) { @unlink('../' . $fotoLama); }
     };
 
     if ($error === '' && $isTabelBeton) {
+        $objek = $isPaving ? (trim($_POST['objek'] ?? '') ?: null) : null;
         $sampelId  = $_POST['sampel_id'] ?? null;
         if ($sampelId === null || $sampelId === '') { die('Sampel wajib dipilih.'); }
         $cekOwn = $pdo->prepare("SELECT id FROM sampel WHERE id = ? AND booking_id = ?");
@@ -187,35 +208,45 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['simpan_hasil'])) {
             }
 
             // Ganti hasil lama untuk sampel ini supaya tidak menghasilkan baris ganda
-            $pdo->prepare("DELETE FROM hasil_pengujian WHERE sampel_id = ?")->execute([$sampelId]);
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare("DELETE FROM hasil_pengujian WHERE sampel_id = ?")->execute([$sampelId]);
 
-            if ($isCore) {
+                if ($isCore) {
+                    $pdo->prepare(
+                        "INSERT INTO hasil_pengujian (sampel_id, teknisi_id, parameter_uji, tgl_cor, tgl_ditest, umur_hari, diameter, luas_penampang, berat_kg, kode_beton, mutu_beton, beban_maksimum, tinggi_l, rasio_ld, faktor_koreksi, tegangan_benda_uji, konversi_silider6, konversi_kubus15, konversi_umur28, mpa, konversi_umur28_mpa, nilai_hasil, satuan, dokumentasi_file, catatan_teknisi, status_verifikasi)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'terverifikasi')"
+                    )->execute([
+                        $sampelId, $user['id'], $parameterUjiTabel, $tglCor, $tglDites, $umurHari,
+                        $diameterCore, $luasPenampang, $beratKg, $kodeBeton ?: null, $mutuNilai,
+                        $bebanMaks, $tinggiL, $rasioLd, $faktorKoreksi, $tegBendaUji,
+                        $konvSilider6, $konvKubus15, $konvUmur28, $mpaNilai, $konvUmur28Mpa,
+                        $nilaiHasil, $satuanNilai, $dokumentasiPath, $keterangan
+                    ]);
+                } else {
                 $pdo->prepare(
-                    "INSERT INTO hasil_pengujian (sampel_id, teknisi_id, parameter_uji, tgl_cor, tgl_ditest, umur_hari, diameter, luas_penampang, berat_kg, kode_beton, mutu_beton, beban_maksimum, tinggi_l, rasio_ld, faktor_koreksi, tegangan_benda_uji, konversi_silider6, konversi_kubus15, konversi_umur28, mpa, konversi_umur28_mpa, nilai_hasil, satuan, dokumentasi_file, catatan_teknisi, status_verifikasi)
+                    "INSERT INTO hasil_pengujian (sampel_id, teknisi_id, objek, parameter_uji, tgl_cor, tgl_ditest, umur_hari, berat_kg, kode_beton, mutu_beton, beban_maksimum, tegangan_tekan, tegangan_tekan_28_hari, rata_rata, mpa, bentang_l, dimensi_b, dimensi_h, modulus_seksi, momen_lentur, tegangan_lentur, nilai_hasil, satuan, dokumentasi_file, catatan_teknisi, status_verifikasi)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'terverifikasi')"
                 )->execute([
-                    $sampelId, $user['id'], $parameterUjiTabel, $tglCor, $tglDites, $umurHari,
-                    $diameterCore, $luasPenampang, $beratKg, $kodeBeton ?: null, $mutuNilai,
-                    $bebanMaks, $tinggiL, $rasioLd, $faktorKoreksi, $tegBendaUji,
-                    $konvSilider6, $konvKubus15, $konvUmur28, $mpaNilai, $konvUmur28Mpa,
+                    $sampelId, $user['id'], $objek, $parameterUjiTabel, $tglCor, $tglDites, $umurHari, $beratKg,
+                    $kodeBeton ?: null, $mutuNilai,
+                    $bebanMaks, $tegTekan, $teg28, $rataRata, $mpaNilai,
+                    $bentangL, $dimensiB, $dimensiH, $modulusSeksi, $momenLentur, $teganganLentur,
                     $nilaiHasil, $satuanNilai, $dokumentasiPath, $keterangan
                 ]);
-            } else {
-            $pdo->prepare(
-                "INSERT INTO hasil_pengujian (sampel_id, teknisi_id, objek, parameter_uji, tgl_cor, tgl_ditest, umur_hari, berat_kg, kode_beton, mutu_beton, beban_maksimum, tegangan_tekan, tegangan_tekan_28_hari, rata_rata, mpa, bentang_l, dimensi_b, dimensi_h, modulus_seksi, momen_lentur, tegangan_lentur, nilai_hasil, satuan, dokumentasi_file, catatan_teknisi, status_verifikasi)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'terverifikasi')"
-            )->execute([
-                $sampelId, $user['id'], $objek, $parameterUjiTabel, $tglCor, $tglDites, $umurHari, $beratKg,
-                $kodeBeton ?: null, $mutuNilai,
-                $bebanMaks, $tegTekan, $teg28, $rataRata, $mpaNilai,
-                $bentangL, $dimensiB, $dimensiH, $modulusSeksi, $momenLentur, $teganganLentur,
-                $nilaiHasil, $satuanNilai, $dokumentasiPath, $keterangan
-            ]);
+                }
+                $pdo->commit();
+            } catch (PDOException $e) {
+                $pdo->rollBack();
+                error_log('input_nilai tabel beton gagal: ' . $e->getMessage());
+                $error = 'Gagal menyimpan hasil pengujian. Silakan coba lagi.';
             }
 
-            $hapusFotoLama();
-            header("Location: input_nilai.php?booking_id=$bookingId&msg=simpan");
-            exit;
+            if (!$error) {
+                $hapusFotoLama();
+                header("Location: input_nilai.php?booking_id=$bookingId&msg=simpan");
+                exit;
+            }
         }
     } elseif ($error === '') {
 
@@ -283,17 +314,77 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['simpan_hasil'])) {
     }
 
     if ($error === '') {
-    $pdo->prepare("DELETE FROM hasil_pengujian WHERE sampel_id = ?")->execute([$sampelId]);
-    $pdo->prepare(
-        "INSERT INTO hasil_pengujian (sampel_id, teknisi_id, objek, kode_benda_uji, parameter_uji, tgl_cor, tgl_ditest, umur_hari, berat_kg, diameter, diameter_akhir, luas_penampang, luas_penampang_akhir, kode_beton, mutu_beton, beban_tarik_leleh, beban_maksimum, tegangan_tekan, tegangan_tekan_28_hari, mpa, tegangan_tarik, tegangan_leleh, panjang_awal, panjang_akhir, perpanjangan, reduksi_penampang, nilai_hasil, satuan, kesimpulan, dokumentasi_file, catatan_teknisi, status_verifikasi)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'terverifikasi')"
-    )->execute([$sampelId, $user['id'], $objek, $kodeBendaUji, $parameterUji, $tglCor, $tglDitest, $umurHari, $beratKg, $diameter, $diameterAkhir, $luasPenampang, $luasPenampangAkhir, $kodeBeton, $mutuBeton, $bebanTarikLeleh, $bebanMaks, $teganganTekan, $teganganTekan28, $mpa, $teganganTarik, $teganganLeleh, $panjangAwal, $panjangAkhir, $perpanjangan, $reduksi, $nilaiHasil, $satuan, $kesimpulan, $dokumentasiPath, $keterangan ?: $catatanAdmin]);
-
-    $success = 'Hasil pengujian berhasil disimpan.';
-    $hapusFotoLama();
-    header("Location: input_nilai.php?booking_id=$bookingId&msg=simpan");
-    exit;
+    $pdo->beginTransaction();
+    try {
+        $pdo->prepare("DELETE FROM hasil_pengujian WHERE sampel_id = ?")->execute([$sampelId]);
+        $pdo->prepare(
+            "INSERT INTO hasil_pengujian (sampel_id, teknisi_id, objek, kode_benda_uji, parameter_uji, tgl_cor, tgl_ditest, umur_hari, berat_kg, diameter, diameter_akhir, luas_penampang, luas_penampang_akhir, kode_beton, mutu_beton, beban_tarik_leleh, beban_maksimum, tegangan_tekan, tegangan_tekan_28_hari, mpa, tegangan_tarik, tegangan_leleh, panjang_awal, panjang_akhir, perpanjangan, reduksi_penampang, nilai_hasil, satuan, kesimpulan, dokumentasi_file, catatan_teknisi, status_verifikasi)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'terverifikasi')"
+        )->execute([$sampelId, $user['id'], $objek, $kodeBendaUji, $parameterUji, $tglCor, $tglDites, $umurHari, $beratKg, $diameter, $diameterAkhir, $luasPenampang, $luasPenampangAkhir, $kodeBeton, $mutuBeton, $bebanTarikLeleh, $bebanMaks, $teganganTekan, $teganganTekan28, $mpa, $teganganTarik, $teganganLeleh, $panjangAwal, $panjangAkhir, $perpanjangan, $reduksi, $nilaiHasil, $satuan, $kesimpulan, $dokumentasiPath, $keterangan ?: $catatanAdmin]);
+        $pdo->commit();
+    } catch (PDOException $e) {
+        $pdo->rollBack();
+        error_log('input_nilai satuan gagal: ' . $e->getMessage());
+        $error = 'Gagal menyimpan hasil pengujian. Silakan coba lagi.';
     }
+
+    if (!$error) {
+        $success = 'Hasil pengujian berhasil disimpan.';
+        $hapusFotoLama();
+        header("Location: input_nilai.php?booking_id=$bookingId&msg=simpan");
+        exit;
+    }
+    }
+    }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['upload_dokumentasi'])) {
+    if (!csrf_check()) { die('Token CSRF tidak valid. Muat ulang halaman.'); }
+
+    if (!isset($_FILES['dokumentasi']) || ($_FILES['dokumentasi']['error'] ?? UPLOAD_ERR_NO_FILE) === UPLOAD_ERR_NO_FILE) {
+        $error = 'Pilih file dokumentasi terlebih dahulu.';
+    } elseif ($_FILES['dokumentasi']['error'] !== 0) {
+        $error = 'Upload dokumentasi gagal (kemungkinan file terlalu besar). Maksimal 5MB.';
+    } else {
+        $ext = strtolower(pathinfo($_FILES['dokumentasi']['name'], PATHINFO_EXTENSION));
+        if (!in_array($ext, ['jpg', 'jpeg', 'png'])) {
+            $error = 'Format file dokumentasi harus JPG, JPEG, atau PNG.';
+        } elseif ($_FILES['dokumentasi']['size'] > 5 * 1024 * 1024) {
+            $error = 'Ukuran file dokumentasi maksimal 5MB.';
+        } elseif (@getimagesize($_FILES['dokumentasi']['tmp_name']) === false) {
+            $error = 'Isi file dokumentasi bukan gambar yang valid.';
+        } else {
+            $namaBaru = 'dokumentasi_' . time() . '_' . uniqid() . '.' . $ext;
+            $folderTujuan = '../uploads/dokumentasi';
+            if (!is_dir($folderTujuan)) mkdir($folderTujuan, 0777, true);
+            if (move_uploaded_file($_FILES['dokumentasi']['tmp_name'], $folderTujuan . '/' . $namaBaru)) {
+                $pathBaru = 'uploads/dokumentasi/' . $namaBaru;
+
+                $stmtOld = $pdo->prepare(
+                    "SELECT DISTINCT hp.dokumentasi_file FROM hasil_pengujian hp JOIN sampel s ON hp.sampel_id = s.id WHERE s.booking_id = ? AND hp.dokumentasi_file IS NOT NULL"
+                );
+                $stmtOld->execute([$bookingId]);
+                $filesLama = $stmtOld->fetchAll(PDO::FETCH_COLUMN);
+
+                $stmtUpd = $pdo->prepare(
+                    "UPDATE hasil_pengujian hp JOIN sampel s ON hp.sampel_id = s.id SET hp.dokumentasi_file = ? WHERE s.booking_id = ?"
+                );
+                $stmtUpd->execute([$pathBaru, $bookingId]);
+
+                if ($stmtUpd->rowCount() === 0) {
+                    @unlink($folderTujuan . '/' . $namaBaru);
+                    $error = 'Belum ada hasil pengujian pada booking ini. Input nilai sampel terlebih dahulu sebelum mengunggah dokumentasi.';
+                } else {
+                    foreach ($filesLama as $fl) {
+                        if ($fl !== $pathBaru && is_file('../' . $fl)) @unlink('../' . $fl);
+                    }
+                    header("Location: input_nilai.php?booking_id=$bookingId&msg=dok_upload");
+                    exit;
+                }
+            } else {
+                $error = 'Upload dokumentasi gagal. Coba lagi.';
+            }
+        }
     }
 }
 
@@ -330,21 +421,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['terbitkan_laporan']))
         }
 
         if (empty($error)) {
-            $pdo->prepare("INSERT INTO laporan (booking_id, nomor_laporan, file_laporan, dicetak_oleh, tanggal_terbit) VALUES (?, ?, ?, ?, CURDATE())")
-                 ->execute([$bookingId, $nomorLaporan, 'pending_generate', $user['id']]);
+            $pdo->beginTransaction();
+            try {
+                $pdo->prepare("INSERT INTO laporan (booking_id, nomor_laporan, file_laporan, dicetak_oleh, tanggal_terbit) VALUES (?, ?, ?, ?, CURDATE())")
+                     ->execute([$bookingId, $nomorLaporan, 'pending_generate', $user['id']]);
 
-            $pdo->prepare("UPDATE bookings SET status_booking = 'validasi_hasil' WHERE id = ?")->execute([$bookingId]);
+                $pdo->prepare("UPDATE bookings SET status_booking = 'validasi_hasil' WHERE id = ?")->execute([$bookingId]);
 
-            $pdo->prepare("INSERT INTO riwayat_status (booking_id, status, diubah_oleh, keterangan) VALUES (?, 'validasi_hasil', ?, ?)")
-                 ->execute([$bookingId, $user['id'], "Laporan diterbitkan (No. $nomorLaporan). Menunggu validasi hasil uji."]);
+                $pdo->prepare("INSERT INTO riwayat_status (booking_id, status, diubah_oleh, keterangan) VALUES (?, 'validasi_hasil', ?, ?)")
+                     ->execute([$bookingId, $user['id'], "Laporan diterbitkan (No. $nomorLaporan). Menunggu validasi hasil uji."]);
+                $pdo->commit();
+            } catch (PDOException $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                error_log('terbitkan_laporan gagal: ' . $e->getMessage());
+                $error = 'Gagal menerbitkan laporan. Silakan coba lagi.';
+            }
 
-            header('Location: kelola_booking.php?msg=input_nilai_berhasil');
-            exit;
+            if (empty($error)) {
+                header('Location: kelola_booking.php?msg=input_nilai_berhasil');
+                exit;
+            }
         }
     }
 }
 
 if (isset($_GET['msg']) && $_GET['msg'] === 'simpan') $success = 'Hasil pengujian berhasil disimpan.';
+elseif (isset($_GET['msg']) && $_GET['msg'] === 'dok_upload') $success = 'Foto dokumentasi berhasil diupload.';
 
 $hasilPerSampel = [];
 $stmtAllHasil = $pdo->prepare(
@@ -407,6 +509,31 @@ foreach ($semuaHasil as $h) {
                                placeholder="Contoh: ITI-U/IX/26/BS/UT/01">
                         <small class="text-muted">Input manual oleh admin. Pastikan nomor unik dan belum pernah dipakai.</small>
                     </div>
+                </div>
+            </div>
+
+            <div class="card border-0 shadow-sm mb-3">
+                <div class="card-header bg-white"><strong>Upload Foto Bukti Pengujian</strong></div>
+                <div class="card-body">
+                    <form method="POST" enctype="multipart/form-data" id="formUploadDokumentasi">
+                        <?= csrf_field() ?>
+                        <input type="hidden" name="booking_id" value="<?= $booking['id'] ?>">
+                        <div class="mb-2">
+                            <input type="file" name="dokumentasi" class="form-control" accept=".jpg,.jpeg,.png,image/jpeg,image/png">
+                            <small class="text-muted">Format JPG/PNG, maks 5MB &mdash; foto bukti ini akan tampil di laporan. Cukup upload 1 kali.</small>
+                        </div>
+                        <button type="submit" name="upload_dokumentasi" class="btn btn-primary btn-sm">Upload Dokumentasi</button>
+                    </form>
+                    <?php $fotoBooking = null;
+                    $stFotoB = $pdo->prepare("SELECT hp.dokumentasi_file FROM hasil_pengujian hp JOIN sampel s ON hp.sampel_id = s.id WHERE s.booking_id = ? AND hp.dokumentasi_file IS NOT NULL ORDER BY hp.id DESC LIMIT 1");
+                    $stFotoB->execute([$bookingId]);
+                    $fotoBooking = $stFotoB->fetchColumn() ?: null;
+                    if ($fotoBooking): ?>
+                    <div class="mt-2">
+                        <img src="../<?= htmlspecialchars($fotoBooking) ?>" alt="Dokumentasi" style="max-height:80px;" class="rounded border">
+                        <br><small class="text-muted">Foto sudah terupload. Upload ulang hanya jika ingin mengganti.</small>
+                    </div>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -474,14 +601,6 @@ foreach ($semuaHasil as $h) {
                 <?= csrf_field() ?>
                 <input type="hidden" name="booking_id" value="<?= $booking['id'] ?>">
                 <input type="hidden" name="sampel_id" value="<?= $s['id'] ?>">
-
-                <div class="d-flex justify-content-end mb-3">
-                    <div class="text-end" style="max-width:420px; width:100%;">
-                        <label class="form-label mb-1" style="font-size:0.78rem;">Upload Foto Bukti Pengujian</label>
-                        <input type="file" name="dokumentasi" class="form-control form-control-sm" accept=".jpg,.jpeg,.png,image/jpeg,image/png">
-                        <small class="text-muted">Format JPG/PNG, maks 5MB &mdash; foto bukti ini akan tampil di laporan.</small>
-                    </div>
-                </div>
 
                 <?php if ($isCore): ?>
                 <!-- Uji Tekan Core Drill -->
@@ -677,6 +796,7 @@ foreach ($semuaHasil as $h) {
                     <div class="col-12 mb-3">
                         <label class="form-label">Obyek</label>
                         <input type="text" name="objek" class="form-control" placeholder="misal: Paving ( 10 x 20cm )"
+                               pattern="[A-Za-z].*" title="Obyek harus diawali dengan huruf"
                                value="<?= htmlspecialchars($v['objek']) ?>">
                     </div>
                 </div>
@@ -795,19 +915,12 @@ foreach ($semuaHasil as $h) {
                     <input type="hidden" name="booking_id" value="<?= $booking['id'] ?>">
                     <input type="hidden" name="sampel_id" value="<?= $s['id'] ?>">
 
-                    <div class="d-flex justify-content-end mb-3">
-                        <div class="text-end" style="max-width:420px; width:100%;">
-                            <label class="form-label mb-1" style="font-size:0.78rem;">Upload Foto Bukti Pengujian</label>
-                            <input type="file" name="dokumentasi" class="form-control form-control-sm" accept=".jpg,.jpeg,.png,image/jpeg,image/png">
-                            <small class="text-muted">Format JPG/PNG, maks 5MB &mdash; foto bukti ini akan tampil di laporan.</small>
-                        </div>
-                    </div>
-
                     <?php if (($booking['kategori'] ?? 'beton') === 'besi'): ?>
                     <div class="row">
                         <div class="col-sm-12 mb-3">
                             <label class="form-label">Obyek <span class="text-danger">*</span></label>
                             <input type="text" name="objek" class="form-control" required
+                                   pattern="[A-Za-z].*" title="Obyek harus diawali dengan huruf"
                                    placeholder="Obyek pengujian besi (misal: Pondasi Tower Leg A)">
                         </div>
                     </div>

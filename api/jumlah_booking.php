@@ -8,14 +8,17 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-$roleUser = $_SESSION['user_role'] ?? '';
+require '../config/database.php';
+
+// Cek peran dari database (otoritatif), bukan hanya isi sesi
+$stmtRole = $pdo->prepare("SELECT role FROM users WHERE id = ?");
+$stmtRole->execute([(int) $_SESSION['user_id']]);
+$roleUser = (string) ($stmtRole->fetchColumn() ?: '');
 if (!in_array($roleUser, ['pelanggan', 'admin'], true)) {
     http_response_code(403);
     echo json_encode(['error' => 'Forbidden']);
     exit;
 }
-
-require '../config/database.php';
 
 $tanggal = $_GET['tanggal'] ?? '';
 

@@ -52,7 +52,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($_POST['jenis_pengujian_id']
 }
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['simpan'])) {
-    foreach (['user_id','catatan_admin','supplier','proyek','lokasi','nomor_laporan','jenis_pengujian_id'] as $kPost) {
+    foreach (['user_id','catatan_admin','supplier','proyek','lokasi','objek','nomor_laporan','jenis_pengujian_id'] as $kPost) {
         if (isset($_POST[$kPost]) && is_array($_POST[$kPost])) { $_POST[$kPost] = reset($_POST[$kPost]) ?: ''; }
     }
     $uid = (int) ($_POST['user_id'] ?? 0);
@@ -125,14 +125,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['simpan'])) {
 
     if (empty($error) && empty($supplier)) {
         $error = 'Supplier wajib diisi.';
+    } elseif (empty($error) && $supplier !== '' && !preg_match('/^[A-Za-z]/', $supplier)) {
+        $error = 'Supplier harus diawali dengan huruf.';
     }
 
     if (empty($error) && $proyek === '') {
         $error = 'Proyek wajib diisi.';
+    } elseif (empty($error) && $proyek !== '' && !preg_match('/^[A-Za-z]/', $proyek)) {
+        $error = 'Nama proyek harus diawali dengan huruf.';
     }
 
     if (empty($error) && $lokasi === '') {
         $error = 'Lokasi wajib diisi.';
+    } elseif (empty($error) && $lokasi !== '' && !preg_match('/^[A-Za-z]/', $lokasi)) {
+        $error = 'Lokasi harus diawali dengan huruf.';
     }
 
     if (empty($error)) {
@@ -146,8 +152,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['simpan'])) {
             }
         }
     }
-    if ($isBesi && $objek === '') {
+    if (empty($error) && $isBesi && $objek === '') {
         $error = 'Obyek wajib diisi untuk pengujian besi.';
+    } elseif (empty($error) && $objek !== '' && !preg_match('/^[A-Za-z]/', $objek)) {
+        $error = 'Obyek harus diawali dengan huruf.';
     }
 
     $fieldList = ['parameter_uji','nilai_hasil','satuan','kesimpulan','berat_kg','beban_maksimum',
@@ -265,6 +273,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['simpan'])) {
                 );
             }
 
+            $pdo->beginTransaction();
+            try {
             for ($i = 0; $i < $jmlBaris; $i++) {
                 $tglCor   = tanggalManualKeYmd($rowTglCor[$i] ?? '');
                 $tglDites = tanggalManualKeYmd($rowTglDites[$i] ?? '');
@@ -363,7 +373,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['simpan'])) {
                 }
                 $jumlahSimpan++;
             }
+            $pdo->commit();
+            } catch (PDOException $e) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                error_log('input_historis tabel gagal: ' . $e->getMessage());
+                $error = 'Gagal menyimpan data historis. Silakan coba lagi.';
+            }
 
+            if (empty($error)) {
             if ($jumlahSimpan === 0) {
                 $error = 'Minimal isi 1 baris data pengujian.';
             } else {
@@ -371,10 +388,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['simpan'])) {
                 header("Location: input_historis.php?user_id=$userId&msg=ok");
                 exit;
             }
+            }
         } else {
 
         $totalBaris = $isBesi ? count($kodeBendaUjiList) : count($parameterList);
 
+        $pdo->beginTransaction();
+        try {
         for ($i = 0; $i < $totalBaris; $i++) {
         $param = trim($parameterList[$i] ?? '');
         $nilai = trim($nilaiList[$i] ?? '');
@@ -443,11 +463,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['simpan'])) {
         ]);
         $jumlahSimpan++;
     }
+        $pdo->commit();
+        } catch (PDOException $e) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('input_historis baris gagal: ' . $e->getMessage());
+            $error = 'Gagal menyimpan data historis. Silakan coba lagi.';
+        }
 
+        if (empty($error)) {
             if ($jumlahSimpan === 0) {
                 $error = 'Minimal isi 1 baris data pengujian.';
             } else {
-                $success = "$jumlahSimpan data historis berhasil disimpan.";
                 $userId = $uid;
                 header("Location: input_historis.php?user_id=$userId&msg=ok");
                 exit;
@@ -455,18 +481,38 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['simpan'])) {
         }
     }
 }
+}
 
 if (isset($_GET['msg']) && $_GET['msg'] === 'ok') $success = 'Data historis berhasil disimpan.';
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error !== '' && !empty($dokumentasiPath) && is_file('../' . $dokumentasiPath)) {
+    @unlink('../' . $dokumentasiPath);
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['hapus_historis'])) {
     if (!csrf_check()) { die('Token CSRF tidak valid. Muat ulang halaman.'); }
 
     $hapusId = (int) ($_POST['hapus_id'] ?? 0);
-    $pdo->prepare("DELETE FROM hasil_pengujian WHERE id = ? AND sampel_id IS NULL AND user_id = ?")->execute([$hapusId, $userId]);
-    header("Location: input_historis.php?user_id=$userId&msg=hapus");
+    $stmtHapus = $pdo->prepare("SELECT id, dokumentasi_file FROM hasil_pengujian WHERE id = ? AND sampel_id IS NULL AND user_id = ?");
+    $stmtHapus->execute([$hapusId, $userId]);
+    $rowHapus = $stmtHapus->fetch();
+    if ($rowHapus) {
+        $pdo->prepare("DELETE FROM hasil_pengujian WHERE id = ?")->execute([$hapusId]);
+        if (!empty($rowHapus['dokumentasi_file'])) {
+            $stShare = $pdo->prepare("SELECT COUNT(*) FROM hasil_pengujian WHERE dokumentasi_file = ? AND id != ?");
+            $stShare->execute([$rowHapus['dokumentasi_file'], $hapusId]);
+            if ((int) $stShare->fetchColumn() === 0 && is_file('../' . $rowHapus['dokumentasi_file'])) {
+                @unlink('../' . $rowHapus['dokumentasi_file']);
+            }
+        }
+        header("Location: input_historis.php?user_id=$userId&msg=hapus");
+    } else {
+        header("Location: input_historis.php?user_id=$userId&msg=hapus_gagal");
+    }
     exit;
 }
 if (isset($_GET['msg']) && $_GET['msg'] === 'hapus') $success = 'Data historis berhasil dihapus.';
+elseif (isset($_GET['msg']) && $_GET['msg'] === 'hapus_gagal') $error = 'Data tidak ditemukan atau bukan milik Anda.';
 
 $dataHistoris = [];
 if (!empty($userId)) {
@@ -571,6 +617,7 @@ if (!empty($userId)) {
                         <div class="col-sm-2 mb-3">
                             <label class="form-label">Supplier <span class="text-danger">*</span></label>
                             <input type="text" name="supplier" class="form-control" required
+                                   pattern="[A-Za-z].*" title="Nama supplier harus diawali dengan huruf"
                                    placeholder="Nama supplier" value="<?= htmlspecialchars($_POST['supplier'] ?? '') ?>">
                         </div>
                     </div>
@@ -579,11 +626,13 @@ if (!empty($userId)) {
                         <div class="col-sm-6 mb-3">
                             <label class="form-label">Proyek <span class="text-danger">*</span></label>
                             <input type="text" name="proyek" class="form-control" required
+                                   pattern="[A-Za-z].*" title="Nama proyek harus diawali dengan huruf"
                                    placeholder="Nama proyek" value="<?= htmlspecialchars($_POST['proyek'] ?? '') ?>">
                         </div>
                         <div class="col-sm-6 mb-3">
                             <label class="form-label">Lokasi <span class="text-danger">*</span></label>
                             <input type="text" name="lokasi" class="form-control" required
+                                   pattern="[A-Za-z].*" title="Lokasi harus diawali dengan huruf"
                                    placeholder="Lokasi proyek" value="<?= htmlspecialchars($_POST['lokasi'] ?? '') ?>">
                         </div>
                     </div>
@@ -592,6 +641,7 @@ if (!empty($userId)) {
                         <div class="col-sm-12 mb-3">
                             <label class="form-label">Obyek <span class="text-danger" id="tandaWajibObjek"<?= $isBesiAwal ? '' : ' style="display:none;"' ?>>*</span></label>
                             <input type="text" name="objek" id="inputObjekBesi" class="form-control"
+                                   pattern="[A-Za-z].*" title="Obyek harus diawali dengan huruf"
                                    placeholder="Obyek pengujian (misal: Paving ( 10 x 20cm ) / Pondasi Tower Leg A)" value="<?= htmlspecialchars($_POST['objek'] ?? '') ?>">
                         </div>
                     </div>
@@ -1778,6 +1828,7 @@ if (!empty($userId)) {
 
         var editIsBesi = false;
         var editIsCore = false;
+        var isPavingRow = false;
 
         function openEditModal(id) {
             fetch('edit_historis_ajax.php?id=' + id)
@@ -1788,14 +1839,14 @@ if (!empty($userId)) {
                 var modeUmum = document.getElementById('editModeUmum');
                 var jenisNama = d.jenis_pengujian || '';
                 var isKubusRow = jenisNama.indexOf('Uji Tekan Kubus') === 0 && jenisNama.indexOf('Mortar') === -1;
-                var isPavingRow = jenisNama.indexOf('Uji Tekan Paving') === 0 ||
+                isPavingRow = jenisNama.indexOf('Uji Tekan Paving') === 0 ||
                                   jenisNama.indexOf('Uji Tekan Bata Merah') === 0 ||
                                   jenisNama.indexOf('Uji Tekan Hebel') === 0;
                 var isLenturRow = jenisNama.indexOf('Uji Lentur') === 0 || jenisNama.indexOf('Flexural') !== -1;
                 var isCoreRow = jenisNama.indexOf('Uji Tekan Core Drill') === 0;
                 editIsCore = isCoreRow;
                 var isSilinder = isKubusRow || jenisNama.indexOf('Uji Tekan Silinder') === 0 || isPavingRow || isLenturRow || isCoreRow;
-                editIsBesi = !isSilinder && !d.tgl_cor;
+                editIsBesi = d.kategori ? (d.kategori === 'besi') : (!isSilinder && !d.tgl_cor);
                 if (modeUmum) modeUmum.style.display = isSilinder ? 'none' : '';
                 var colMpa = document.getElementById('editColMpa');
                 if (colMpa) colMpa.style.display = (isKubusRow || isPavingRow || isLenturRow || isCoreRow) ? 'none' : '';
@@ -1890,6 +1941,10 @@ if (!empty($userId)) {
             var id = document.getElementById('edit-id').value;
                 if (!document.getElementById('edit-proyek').value.trim()) { alert('Proyek wajib diisi.'); return; }
                 if (!document.getElementById('edit-lokasi').value.trim()) { alert('Lokasi wajib diisi.'); return; }
+                if (!/^[A-Za-z]/.test(document.getElementById('edit-proyek').value.trim())) { alert('Nama proyek harus diawali dengan huruf. Angka hanya boleh setelah huruf.'); return; }
+                if (!/^[A-Za-z]/.test(document.getElementById('edit-lokasi').value.trim())) { alert('Lokasi harus diawali dengan huruf. Angka hanya boleh setelah huruf.'); return; }
+                var objekEditVal = document.getElementById('edit-objek').value.trim();
+                if ((editIsBesi || isPavingRow) && objekEditVal && !/^[A-Za-z]/.test(objekEditVal)) { alert('Obyek harus diawali dengan huruf. Angka hanya boleh setelah huruf.'); return; }
                 var payload = {
                 id: id,
                 csrf_token: getCsrfToken(),

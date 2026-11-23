@@ -43,10 +43,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $stmtUpdate = $pdo->prepare("UPDATE bookings SET status_booking = 'menunggu_diuji' WHERE id = ?");
     $stmtUpdate->execute([$bookingId]);
 
+    $kodeAkhir = $kodeDasar . '-' . str_pad(max(1, $jumlahSampel), 2, '0', STR_PAD_LEFT);
+    $labelKode = $jumlahSampel > 1
+        ? $kodeDasar . '-01 s/d ' . $kodeAkhir
+        : $kodeAkhir;
     $pdo->prepare(
         "INSERT INTO riwayat_status (booking_id, status, diubah_oleh, keterangan)
          VALUES (?, 'sampel_diterima', ?, ?)"
-    )->execute([$bookingId, $user['id'], "Sampel diterima oleh Admin (Kode: $kodeSampel)."]);
+    )->execute([$bookingId, $user['id'], "Sampel diterima oleh Admin (Kode: $labelKode)."]);
 
     $pdo->prepare(
         "INSERT INTO riwayat_status (booking_id, status, diubah_oleh, keterangan)

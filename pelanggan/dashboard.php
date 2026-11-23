@@ -34,6 +34,14 @@ $bookingSelesai = $pdo->prepare("SELECT COUNT(*) FROM bookings WHERE user_id = ?
 $bookingSelesai->execute([$user['id']]);
 $totalSelesai = $bookingSelesai->fetchColumn();
 
+$stmtAll = $pdo->prepare(
+    "SELECT b.*, j.nama_pengujian FROM bookings b
+     JOIN jenis_pengujian j ON b.jenis_pengujian_id = j.id
+     WHERE b.user_id = ? ORDER BY b.created_at DESC LIMIT 5"
+);
+$stmtAll->execute([$user['id']]);
+$daftarTerbaru = $stmtAll->fetchAll();
+
 require '../config/labels.php';
 ?>
 <!DOCTYPE html>
@@ -83,7 +91,7 @@ require '../config/labels.php';
                     <div>
                         <small class="opacity-75">Booking Aktif</small>
                         <h5 class="mb-1"><?= htmlspecialchars($aktif['kode_booking']) ?></h5>
-                        <small class="opacity-75"><?= htmlspecialchars($aktif['nama_pengujian']) ?> &bull; <?= date('d M Y', strtotime($aktif['tanggal_pengujian_diminta'])) ?></small>
+                        <small class="opacity-75"><?= htmlspecialchars($aktif['nama_pengujian']) ?> &bull; <?= $aktif['tanggal_pengujian_diminta'] ? date('d M Y', strtotime($aktif['tanggal_pengujian_diminta'])) : '-' ?></small>
                     </div>
                     <div class="text-end">
                         <?php if (($aktif['tipe_booking'] ?? 'online') === 'online'): ?>
@@ -137,7 +145,7 @@ require '../config/labels.php';
                 <a href="riwayat.php" class="btn btn-sm btn-outline-primary">Lihat Semua</a>
             </div>
             <div class="card-body p-0">
-                <?php if (empty($aktif)): ?>
+                <?php if (empty($daftarTerbaru)): ?>
                     <div class="text-center py-5">
                         <i class="bi bi-inbox text-muted" style="font-size: 3rem;"></i>
                         <p class="text-muted mt-2 mb-3">Belum ada booking.</p>
@@ -149,13 +157,7 @@ require '../config/labels.php';
                         <thead><tr><th>Kode</th><th>Tipe</th><th>Jenis Pengujian</th><th>Tanggal</th><th>Status</th><th></th></tr></thead>
                         <tbody>
                             <?php
-                            $stmtAll = $pdo->prepare(
-                                "SELECT b.*, j.nama_pengujian FROM bookings b
-                                 JOIN jenis_pengujian j ON b.jenis_pengujian_id = j.id
-                                 WHERE b.user_id = ? ORDER BY b.created_at DESC LIMIT 5"
-                            );
-                            $stmtAll->execute([$user['id']]);
-                            foreach ($stmtAll->fetchAll() as $b): [$label, $warna] = labelStatus($b['status_booking']);
+                            foreach ($daftarTerbaru as $b): [$label, $warna] = labelStatus($b['status_booking']);
                             ?>
                             <tr>
                                 <td><strong><?= htmlspecialchars($b['kode_booking']) ?></strong></td>

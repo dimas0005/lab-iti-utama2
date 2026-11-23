@@ -5,9 +5,12 @@ requireRole(['teknisi']);
 
 $user = currentUser($pdo);
 $success = '';
+$error = '';
 if (isset($_GET['msg']) && $_GET['msg'] === 'sampel_selesai') $success = 'Semua sampel selesai diuji.';
 if (isset($_GET['msg']) && $_GET['msg'] === 'sampel_selesai_sebagian') $success = 'Sampel yang dipilih selesai diuji. Masih ada sampel lain yang belum selesai, booking tetap menunggu.';
 if (isset($_GET['msg']) && $_GET['msg'] === 'mulai_uji') $success = 'Pengujian berhasil dimulai.';
+if (isset($_GET['msg']) && $_GET['msg'] === 'sudah_selesai_uji') $error = 'Booking sudah selesai diuji dan menunggu input nilai oleh admin.';
+if (isset($_GET['msg']) && $_GET['msg'] === 'perlu_mulai') $error = 'Pengujian belum dimulai. Mulai pengujian terlebih dahulu sebelum menandai selesai.';
 
 // Pastikan booking memang ditugaskan ke teknisi ini
 function bookingMilikTeknisi($pdo, $bookingId, $teknisiId) {
@@ -30,6 +33,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['selesai_uji_semua']))
         die('Booking tidak ditemukan atau tidak ditugaskan kepada Anda.');
     }
 
+    $stmtStatus = $pdo->prepare("SELECT status_booking FROM bookings WHERE id = ?");
+    $stmtStatus->execute([$bookingId]);
+    $statusSekarang = $stmtStatus->fetchColumn();
+
+    if ($statusSekarang === 'menunggu_input_admin') {
+        header('Location: jadwal.php?msg=sudah_selesai_uji');
+        exit;
+    }
+    if ($statusSekarang !== 'sedang_diuji') {
+        header('Location: jadwal.php?msg=perlu_mulai');
+        exit;
+    }
+
+    $pdo->beginTransaction();
     $pdo->prepare("UPDATE sampel SET status_sampel = 'selesai_diuji' WHERE booking_id = ? AND status_sampel = 'sedang_diuji'")
          ->execute([$bookingId]);
 
@@ -38,6 +55,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['selesai_uji_semua']))
     $sisaBelum = (int) $stmtSisa->fetchColumn();
 
     if ($sisaBelum > 0) {
+        $pdo->rollBack();
         header('Location: jadwal.php?msg=sampel_selesai_sebagian');
         exit;
     }
@@ -45,6 +63,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['selesai_uji_semua']))
     $pdo->prepare("UPDATE bookings SET status_booking = 'menunggu_input_admin' WHERE id = ?")->execute([$bookingId]);
     $pdo->prepare("INSERT INTO riwayat_status (booking_id, status, diubah_oleh, keterangan) VALUES (?, 'menunggu_input_admin', ?, ?)")
          ->execute([$bookingId, $user['id'], "Seluruh sampel selesai diuji oleh teknisi {$user['nama_lengkap']}, menunggu input nilai oleh admin"]);
+    $pdo->commit();
 
     header('Location: jadwal.php?msg=sampel_selesai');
     exit;
@@ -60,19 +79,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['mulai_uji'])) {
         die('Booking tidak ditemukan atau tidak ditugaskan kepada Anda.');
     }
 
-    $pdo->prepare("UPDATE sampel SET status_sampel = 'sedang_diuji' WHERE booking_id = ? AND status_sampel = 'diterima'")
-         ->execute([$bookingId]);
-
     $stmtCekBooking = $pdo->prepare("SELECT status_booking FROM bookings WHERE id = ?");
     $stmtCekBooking->execute([$bookingId]);
     $statusSekarang = $stmtCekBooking->fetchColumn();
 
-    if ($statusSekarang === 'menunggu_diuji') {
-        $pdo->prepare("UPDATE bookings SET status_booking = 'sedang_diuji' WHERE id = ?")->execute([$bookingId]);
-        $pdo->prepare("INSERT INTO riwayat_status (booking_id, status, diubah_oleh, keterangan) VALUES (?, 'sedang_diuji', ?, ?)")
-             ->execute([$bookingId, $user['id'], "Pengujian dimulai oleh teknisi {$user['nama_lengkap']}"]);
-
+    if ($statusSekarang === 'sedang_diuji') {
+        header('Location: jadwal.php?msg=mulai_uji');
+        exit;
     }
+    if ($statusSekarang !== 'menunggu_diuji') {
+        die('Booking tidak dalam status yang dapat dimulai.');
+    }
+
+    $pdo->beginTransaction();
+    $pdo->prepare("UPDATE sampel SET status_sampel = 'sedang_diuji' WHERE booking_id = ? AND status_sampel = 'diterima'")
+         ->execute([$bookingId]);
+
+    $pdo->prepare("UPDATE bookings SET status_booking = 'sedang_diuji' WHERE id = ?")->execute([$bookingId]);
+    $pdo->prepare("INSERT INTO riwayat_status (booking_id, status, diubah_oleh, keterangan) VALUES (?, 'sedang_diuji', ?, ?)")
+         ->execute([$bookingId, $user['id'], "Pengujian dimulai oleh teknisi {$user['nama_lengkap']}"]);
+    $pdo->commit();
+
     header('Location: jadwal.php?msg=mulai_uji');
     exit;
 }
@@ -181,6 +208,7 @@ foreach ($daftarBooking as $bk) {
         </div>
 
         <?php if ($success): ?><div class="alert alert-success"><?= htmlspecialchars($success) ?></div><?php endif; ?>
+        <?php if ($error): ?><div class="alert alert-danger"><?= htmlspecialchars($error) ?></div><?php endif; ?>
 
         <?php if (empty($daftarBooking)): ?>
             <div class="alert alert-info">Belum ada jadwal pengujian yang ditugaskan kepada Anda.</div>

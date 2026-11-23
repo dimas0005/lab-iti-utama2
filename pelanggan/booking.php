@@ -12,6 +12,8 @@ $stmtJenis = $pdo->query("SELECT * FROM jenis_pengujian WHERE status_aktif = 1 O
 $daftarJenis = $stmtJenis->fetchAll();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $_POST = array_map(function ($v) { return is_array($v) ? '' : $v; }, $_POST);
+
     $jenisPengujianId = $_POST['jenis_pengujian_id'] ?? '';
     $penanggungJawab = trim($_POST['penanggung_jawab'] ?? '');
     $jumlahSampel = (int) ($_POST['jumlah_sampel'] ?? 0);
@@ -38,27 +40,58 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $jenis = $stmtHarga->fetch();
         $minSampel = $jenis ? minSampelPengujian($jenis['nama_pengujian'], $jenis['kategori']) : 1;
 
-        if (!$jenis) {
-        $error = 'Jenis pengujian tidak valid.';
-    } elseif ($penanggungJawab === '') {
-        $error = 'Nama penanggung jawab wajib diisi.';
-    } elseif ($objekPengujian === '') {
-        $error = 'Obyek pengujian wajib diisi.';
-    } elseif ($lokasi === '') {
-        $error = 'Lokasi wajib diisi.';
-    } elseif (empty($supplier)) {
-        $error = 'Supplier wajib diisi.';
-    } elseif ($jenis['kategori'] === 'beton' && !in_array($mutuBeton, $daftarMutu, true)) {
-        $error = 'Mutu beton wajib dipilih.';
-    } elseif ($jumlahSampel < 1) {
-        $error = 'Jumlah sampel minimal 1.';
-    } elseif ($jumlahSampel < $minSampel) {
-        $error = 'Untuk pengujian "' . $jenis['nama_pengujian'] . '", jumlah sampel minimal ' . $minSampel . ' pcs.';
-    } elseif (!tanggalValid($tanggalPengujian)) {
-        $error = 'Tanggal pengujian tidak valid.';
-    } elseif (strtotime($tanggalPengujian) < strtotime(date('Y-m-d'))) {
-        $error = 'Tanggal pengujian tidak boleh di masa lalu.';
-    } else {
+        $wajibKosong = [];
+        if ($jenisPengujianId === '') {
+            $wajibKosong[] = 'Jenis Pengujian';
+        }
+        if ($penanggungJawab === '') {
+            $wajibKosong[] = 'Penanggung Jawab';
+        }
+        if ($objekPengujian === '') {
+            $wajibKosong[] = 'Nama Proyek';
+        }
+        if ($lokasi === '') {
+            $wajibKosong[] = 'Lokasi';
+        }
+        if ($supplier === '') {
+            $wajibKosong[] = 'Supplier';
+        }
+        if ($tanggalPengujian === '') {
+            $wajibKosong[] = 'Tanggal Pengujian';
+        }
+        if ($jenis && $jenis['kategori'] === 'beton' && !in_array($mutuBeton, $daftarMutu, true)) {
+            $wajibKosong[] = 'Mutu Beton';
+        }
+
+        if ($wajibKosong) {
+            $error = 'Isian wajib berikut masih kosong: ' . implode(', ', $wajibKosong) . '.';
+        } elseif (!$jenis) {
+            $error = 'Jenis pengujian tidak valid.';
+        } elseif (!preg_match('/^[A-Za-z]/', $penanggungJawab)) {
+            $error = 'Nama penanggung jawab harus diawali dengan huruf. Angka hanya boleh setelah huruf.';
+        } elseif (strlen($penanggungJawab) > 150) {
+            $error = 'Nama penanggung jawab maksimal 150 karakter.';
+        } elseif (!preg_match('/^[A-Za-z]/', $objekPengujian)) {
+            $error = 'Nama proyek harus diawali dengan huruf. Angka hanya boleh setelah huruf.';
+        } elseif (strlen($objekPengujian) > 255) {
+            $error = 'Nama proyek maksimal 255 karakter.';
+        } elseif (!preg_match('/^[A-Za-z]/', $lokasi)) {
+            $error = 'Lokasi harus diawali dengan huruf. Angka hanya boleh setelah huruf.';
+        } elseif (strlen($lokasi) > 255) {
+            $error = 'Lokasi maksimal 255 karakter.';
+        } elseif (!preg_match('/^[A-Za-z]/', $supplier)) {
+            $error = 'Supplier harus diawali dengan huruf. Angka hanya boleh setelah huruf.';
+        } elseif (strlen($supplier) > 255) {
+            $error = 'Supplier maksimal 255 karakter.';
+        } elseif ($jumlahSampel < 1) {
+            $error = 'Jumlah sampel minimal 1.';
+        } elseif ($jumlahSampel < $minSampel) {
+            $error = 'Untuk pengujian "' . $jenis['nama_pengujian'] . '", jumlah sampel minimal ' . $minSampel . ' pcs.';
+        } elseif (!tanggalValid($tanggalPengujian)) {
+            $error = 'Tanggal pengujian tidak valid.';
+        } elseif (strtotime($tanggalPengujian) < strtotime(date('Y-m-d'))) {
+            $error = 'Tanggal pengujian tidak boleh di masa lalu.';
+        } else {
         $estimasiBiaya = $jenis['harga'] * $jumlahSampel;
 
         // Cas tambahan: Sabtu/Minggu +400rb, hari ini booking setelah jam 16:00 +250rb
@@ -138,27 +171,67 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                   tanggal_pengujian_diminta, dokumen_persyaratan, estimasi_biaya, catatan_pelanggan, objek_pengujian, lokasi, supplier, mutu_beton, tambahan_cetak, tambahan_setting, tipe_booking, status_booking)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             );
-            $stmt->execute([
+            $paramsBooking = [
                 $kodeBooking, $user['id'], $jenisPengujianId, $penanggungJawab,
                 $jumlahSampel, $tanggalPengujian, $dokumenPath, $estimasiBiaya, $catatan, $objekPengujian, $lokasi, $supplier,
                 ($jenis['kategori'] === 'beton' ? $mutuBeton : null), $pakaiCetak, $pakaiSetting, $tipeBooking, $statusAwal
-            ]);
+            ];
+            $insertOk = false;
+            $pdo->beginTransaction();
+            try {
+                for ($coba = 0; $coba < 3; $coba++) {
+                    try {
+                        $stmt->execute($paramsBooking);
+                        $insertOk = true;
+                        break;
+                    } catch (PDOException $e) {
+                        if ((int) $e->getCode() !== 1062 || $coba === 2) {
+                            throw $e;
+                        }
+                        // Kode booking bentrok (UNIQUE), coba dengan kode baru
+                        $kodeBooking = generateKodeBooking($pdo, $jenisPengujianId, $jenis['nama_pengujian'], $jenis['kategori']);
+                        $paramsBooking[0] = $kodeBooking;
+                    }
+                }
 
-            $bookingId = $pdo->lastInsertId();
+                if ($insertOk) {
+                    $bookingId = $pdo->lastInsertId();
 
-            $stmtRiwayat = $pdo->prepare(
-                "INSERT INTO riwayat_status (booking_id, status, diubah_oleh, keterangan)
-                 VALUES (?, ?, ?, ?)"
-            );
-            $stmtRiwayat->execute([$bookingId, $statusAwal, $user['id'], $keteranganRiwayat]);
+                    $stmtRiwayat = $pdo->prepare(
+                        "INSERT INTO riwayat_status (booking_id, status, diubah_oleh, keterangan)
+                         VALUES (?, ?, ?, ?)"
+                    );
+                    $stmtRiwayat->execute([$bookingId, $statusAwal, $user['id'], $keteranganRiwayat]);
+                    $pdo->commit();
+                } else {
+                    $pdo->rollBack();
+                }
+            } catch (PDOException $e) {
+                if ($pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                error_log('booking gagal: ' . $e->getMessage());
+                $error = 'Gagal membuat booking. Silakan coba lagi.';
+            }
 
-            if ($tipeBooking === 'offline') {
-                $success = "Booking offline berhasil dibuat dengan kode: $kodeBooking. Silakan tunggu verifikasi dari admin.";
-            } else {
-                $success = "Booking berhasil dibuat dengan kode: $kodeBooking. Silakan tunggu verifikasi dari admin.";
+            if ($insertOk && $error === '') {
+                $paramMsg = 'msg=ok&kode=' . urlencode($kodeBooking) . ($tipeBooking === 'offline' ? '&tipe=offline' : '');
+                header('Location: booking.php?' . $paramMsg);
+                exit;
             }
         }
     }
+}
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && $error !== '' && !empty($dokumenPath) && is_file('../' . $dokumenPath)) {
+    @unlink('../' . $dokumenPath);
+}
+
+if (isset($_GET['msg']) && $_GET['msg'] === 'ok') {
+    $kodeBaru = preg_replace('/[^A-Za-z0-9\-]/', '', $_GET['kode'] ?? '');
+    $success = (($_GET['tipe'] ?? '') === 'offline')
+        ? "Booking offline berhasil dibuat dengan kode: $kodeBaru. Silakan tunggu verifikasi dari admin."
+        : "Booking berhasil dibuat dengan kode: $kodeBaru. Silakan tunggu verifikasi dari admin.";
 }
 ?>
 <!DOCTYPE html>
@@ -223,6 +296,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="mb-3">
                         <label class="form-label">Penanggung Jawab <span class="text-danger">*</span></label>
                         <input type="text" name="penanggung_jawab" class="form-control" required
+                               pattern="[A-Za-z].*" title="Harus diawali dengan huruf"
                                value="<?= htmlspecialchars($_POST['penanggung_jawab'] ?? $user['nama_lengkap']) ?>" placeholder="Nama penanggung jawab">
                     </div>
                 </div>
@@ -235,14 +309,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <label class="form-label">Tipe Booking</label>
                         <div class="d-flex gap-3">
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="tipe_booking" id="tipeOnline" value="online" checked>
+                                <input class="form-check-input" type="radio" name="tipe_booking" id="tipeOnline" value="online"<?= ($_POST['tipe_booking'] ?? 'online') === 'online' ? ' checked' : '' ?>>
                                 <label class="form-check-label" for="tipeOnline">
                                     <i class="bi bi-globe text-success"></i> <strong>Online</strong><br>
                                     <small class="text-muted">Verifikasi oleh admin</small>
                                 </label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="tipe_booking" id="tipeOffline" value="offline">
+                                <input class="form-check-input" type="radio" name="tipe_booking" id="tipeOffline" value="offline"<?= ($_POST['tipe_booking'] ?? '') === 'offline' ? ' checked' : '' ?>>
                                 <label class="form-check-label" for="tipeOffline">
                                     <i class="bi bi-building text-info"></i> <strong>Offline (Walk-in)</strong><br>
                                     <small class="text-muted">Bayar langsung di loket</small>
@@ -288,7 +362,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="mb-3 d-none" id="rowTambahanCetak">
                         <label class="form-label">Layanan Tambahan (opsional)</label>
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="tambahan_cetak" id="tambahanCetak" value="1">
+                            <input class="form-check-input" type="checkbox" name="tambahan_cetak" id="tambahanCetak" value="1"<?= !empty($_POST['tambahan_cetak']) ? ' checked' : '' ?>>
                             <label class="form-check-label" for="tambahanCetak">
                                 Pemotongan, Setting &amp; Cetak Benda Uji
                                 <span class="text-danger">+Rp <?= number_format(HARGA_TAMBAHAN_CETAK, 0, ',', '.') ?></span> <span class="text-muted">/ sampel</span>
@@ -299,7 +373,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="mb-3 d-none" id="rowTambahanSetting">
                         <label class="form-label">Layanan Tambahan (opsional)</label>
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="tambahan_setting" id="tambahanSetting" value="1">
+                            <input class="form-check-input" type="checkbox" name="tambahan_setting" id="tambahanSetting" value="1"<?= !empty($_POST['tambahan_setting']) ? ' checked' : '' ?>>
                             <label class="form-check-label" for="tambahanSetting">
                                 Setting Ukuran Baja Tulangan
                                 <span class="text-danger">+Rp <?= number_format(HARGA_TAMBAHAN_SETTING, 0, ',', '.') ?></span> <span class="text-muted">/ sampel</span>
@@ -315,17 +389,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="mb-3">
                         <label class="form-label">Nama Proyek <span class="text-danger">*</span></label>
                         <input type="text" name="objek_pengujian" class="form-control" required
+                               pattern="[A-Za-z].*" title="Harus diawali dengan huruf"
                                value="<?= htmlspecialchars($_POST['objek_pengujian'] ?? '') ?>" placeholder="Contoh: Gedung Serba Guna, Jembatan Tol">
                         <small class="text-muted">Masukkan nama proyek.</small>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Lokasi</label>
-                        <input type="text" name="lokasi" class="form-control"
-                               value="<?= htmlspecialchars($_POST['lokasi'] ?? '') ?>" placeholder="Lokasi proyek (opsional)">
+                        <label class="form-label">Lokasi <span class="text-danger">*</span></label>
+                        <input type="text" name="lokasi" class="form-control" required
+                               pattern="[A-Za-z].*" title="Harus diawali dengan huruf"
+                               value="<?= htmlspecialchars($_POST['lokasi'] ?? '') ?>" placeholder="Lokasi proyek">
+                        <small class="text-muted">Masukkan lokasi proyek.</small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Supplier <span class="text-danger">*</span></label>
                         <input type="text" name="supplier" class="form-control" required
+                               pattern="[A-Za-z].*" title="Harus diawali dengan huruf"
                                value="<?= htmlspecialchars($_POST['supplier'] ?? '') ?>" placeholder="Nama supplier material">
                         <small class="text-muted">Masukkan nama supplier material.</small>
                     </div>
@@ -526,6 +604,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             fetch('../api/jumlah_booking.php?tanggal=' + tanggal)
                 .then(r => r.json())
                 .then(data => {
+                    if (typeof data.total !== 'number') {
+                        info.textContent = '';
+                        info.className = 'd-block mt-1';
+                        return;
+                    }
                     if (data.total === 0) {
                         info.innerHTML = '<i class="bi bi-check-circle text-success"></i> Tanggal ini masih kosong, belum ada booking.';
                         info.className = 'd-block mt-1 text-success';
@@ -564,6 +647,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 hintTanggal.classList.add('d-none');
                 if (tanggalInput.value) cekJumlahBooking(tanggalInput.value);
             }
+            hitungEstimasi();
         }
 
         document.querySelectorAll('[name="tipe_booking"]').forEach(function(radio) {
@@ -632,6 +716,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 el.addEventListener('change', function() { bersihkanTanda(this); updateIsiInfo(); });
             });
         }
+        cekMinSampel();
+        hitungEstimasi();
         pasangListenerIsi();
         // Listener ulang saat jenis berubah (mutu muncul/hilang)
         document.getElementById('jenisPengujian').addEventListener('change', function() {
@@ -662,6 +748,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 updateIsiInfo();
                 return false;
             }
+            const tombol = this.querySelector('[type="submit"]');
+            tombol.disabled = true;
+            tombol.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Mengirim...';
         });
     </script>
 </body>

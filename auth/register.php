@@ -6,6 +6,8 @@ $error = '';
 $success = '';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $_POST = array_map(function ($v) { return is_array($v) ? '' : $v; }, $_POST);
+
     $nama = trim($_POST['nama_lengkap'] ?? '');
     $perusahaan = trim($_POST['nama_perusahaan'] ?? '');
     $email = trim($_POST['email'] ?? '');
@@ -17,10 +19,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if ($nama === '' || $email === '' || $telepon === '' || $password === '' || $konfirmasi === '') {
         $error = 'Nama lengkap, email, no. telepon, dan password wajib diisi.';
+    } elseif (!preg_match('/[A-Za-z]/', $nama) || preg_match('/[0-9]/', $nama)) {
+        $error = 'Nama lengkap hanya boleh berisi huruf (tidak boleh ada angka).';
+    } elseif ($perusahaan !== '' && (!preg_match('/[A-Za-z]/', $perusahaan) || preg_match('/[0-9]/', $perusahaan))) {
+        $error = 'Nama perusahaan hanya boleh berisi huruf (tidak boleh ada angka).';
+    } elseif (!preg_match('/^[0-9\s\-\+]+$/', $telepon) || !preg_match('/[0-9]/', $telepon)) {
+        $error = 'No. telepon hanya boleh berisi angka (tidak boleh ada huruf).';
     } elseif (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-        $error = 'Format email tidak valid.';
+        $error = 'Format email tidak valid. Email boleh berupa kombinasi huruf, angka, dan simbol (@ . _ -).';
     } elseif (strlen($password) < 6) {
         $error = 'Password minimal 6 karakter.';
+    } elseif (strlen($nama) > 150) {
+        $error = 'Nama lengkap maksimal 150 karakter.';
+    } elseif (strlen($perusahaan) > 150) {
+        $error = 'Nama perusahaan maksimal 150 karakter.';
+    } elseif (strlen($telepon) > 20) {
+        $error = 'No. telepon maksimal 20 karakter.';
+    } elseif (strlen($email) > 150) {
+        $error = 'Email maksimal 150 karakter.';
+    } elseif (strlen($password) > 72) {
+        $error = 'Password maksimal 72 karakter.';
     } elseif ($password !== $konfirmasi) {
         $error = 'Konfirmasi password tidak cocok.';
     } else {
@@ -36,11 +54,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 "INSERT INTO users (role, nama_lengkap, nama_perusahaan, email, no_telepon, password)
                  VALUES ('pelanggan', ?, ?, ?, ?, ?)"
             );
-            $stmt->execute([$nama, $perusahaan, $email, $telepon, $passwordHash]);
+            try {
+                $stmt->execute([$nama, $perusahaan, $email, $telepon, $passwordHash]);
+            } catch (PDOException $e) {
+                if ((int) $e->getCode() === 1062) {
+                    $error = 'Email sudah terdaftar, silakan gunakan email lain.';
+                } else {
+                    error_log('register gagal: ' . $e->getMessage());
+                    $error = 'Registrasi gagal. Silakan coba lagi nanti.';
+                }
+            }
 
-            $success = 'Registrasi berhasil! Silakan login.';
+            if ($error === '') {
+                header('Location: register.php?msg=ok');
+                exit;
+            }
         }
     }
+}
+
+if (isset($_GET['msg']) && $_GET['msg'] === 'ok') {
+    $success = 'Registrasi berhasil! Silakan login.';
 }
 ?>
 <!DOCTYPE html>
@@ -74,11 +108,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             <?= csrf_field() ?>
             <div class="mb-3">
                 <label class="form-label">Nama Lengkap</label>
-                <input type="text" name="nama_lengkap" class="form-control" placeholder="Masukkan nama lengkap" required>
+                <input type="text" name="nama_lengkap" class="form-control" placeholder="Masukkan nama lengkap" required
+                       pattern="[A-Za-z][^0-9]*" title="Hanya huruf, tidak boleh ada angka">
             </div>
             <div class="mb-3">
                 <label class="form-label">Nama Perusahaan</label>
-                <input type="text" name="nama_perusahaan" class="form-control" placeholder="Masukkan nama perusahaan ">
+                <input type="text" name="nama_perusahaan" class="form-control" placeholder="Masukkan nama perusahaan "
+                       pattern="[A-Za-z][^0-9]*" title="Hanya huruf, tidak boleh ada angka">
             </div>
             <div class="mb-3">
                 <label class="form-label">Email</label>
@@ -86,7 +122,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             </div>
             <div class="mb-3">
                 <label class="form-label">No. Telepon</label>
-                <input type="text" name="no_telepon" class="form-control" placeholder="Masukkan nomor telepon" required>
+                <input type="text" name="no_telepon" class="form-control" placeholder="Masukkan nomor telepon" required
+                       pattern="[0-9+\-\s]+" title="Hanya angka, tidak boleh ada huruf">
             </div>
             <div class="row">
                 <div class="col-md-6 mb-3">

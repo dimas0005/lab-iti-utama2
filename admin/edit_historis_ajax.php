@@ -60,6 +60,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         echo json_encode(['ok' => false, 'msg' => 'Obyek wajib diisi untuk pengujian besi']);
         exit;
     }
+    if (!preg_match('/^[A-Za-z]/', $proyek)) {
+        echo json_encode(['ok' => false, 'msg' => 'Nama proyek harus diawali dengan huruf']);
+        exit;
+    }
+    if (!preg_match('/^[A-Za-z]/', $lokasi)) {
+        echo json_encode(['ok' => false, 'msg' => 'Lokasi harus diawali dengan huruf']);
+        exit;
+    }
+    if ($objek !== null && $objek !== '' && !preg_match('/^[A-Za-z]/', $objek)) {
+        echo json_encode(['ok' => false, 'msg' => 'Obyek harus diawali dengan huruf']);
+        exit;
+    }
     $umurHari = $tglCor && $tglDites
         ? (new DateTime($tglCor))->diff(new DateTime($tglDites))->days
         : null;
@@ -177,6 +189,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $rataRata = null;
     }
 
+    if (!$isBesi && !$isTabelBeton && ($parameterUji === '' || $nilaiHasil === '')) {
+        echo json_encode(['ok' => false, 'msg' => 'Parameter uji dan nilai hasil wajib diisi']);
+        exit;
+    }
+
     $lenturCols = '';
     $lenturParams = [];
     if ($isLentur) {
@@ -246,6 +263,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'GET') {
     $stmt->execute([$id]);
     $data = $stmt->fetch();
     if ($data) {
+        // Kategori ditentukan dari jenis_pengujian (fallback: tgl_cor kosong = besi)
+        $isSil = isUjiSilinder($data['jenis_pengujian']);
+        $isKub = isUjiKubus($data['jenis_pengujian']);
+        $isPav = isUjiPaving($data['jenis_pengujian']);
+        $isLen = isUjiLentur($data['jenis_pengujian']);
+        $isCor = isUjiCoreDrill($data['jenis_pengujian']);
+        $isTabel = $isSil || $isKub || $isPav || $isLen || $isCor;
+        $stmtKat = $pdo->prepare("SELECT kategori FROM jenis_pengujian WHERE nama_pengujian = ? ORDER BY id DESC LIMIT 1");
+        $stmtKat->execute([$data['jenis_pengujian']]);
+        $katJenis = $stmtKat->fetchColumn();
+        $isBesi = ($katJenis !== false && $katJenis !== null && $katJenis !== '')
+            ? ($katJenis === 'besi')
+            : (!$isTabel && empty($data['tgl_cor']));
+        $data['kategori'] = $isBesi ? 'besi' : 'beton';
         echo json_encode(['ok' => true, 'data' => $data]);
     } else {
         echo json_encode(['ok' => false, 'msg' => 'Data tidak ditemukan']);

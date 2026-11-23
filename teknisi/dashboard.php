@@ -1,6 +1,7 @@
 <?php
 require '../config/database.php';
 require '../config/auth.php';
+require '../config/labels.php';
 requireRole(['teknisi']);
 
 $user = currentUser($pdo);
@@ -37,13 +38,13 @@ $jadwalHariIni = $pdo->prepare(
      ORDER BY p.jam_mulai ASC"
 );
 $jadwalHariIni->execute([$user['id']]);
-$dataHariIni = $jadwalHariIni->fetch();
+$dataHariIniList = $jadwalHariIni->fetchAll();
 
 $totalSampelAktif = 0;
 $totalSampelSelesai = 0;
-if ($dataHariIni) {
-    $totalSampelAktif = $dataHariIni['sisa_sampel'];
-    $totalSampelSelesai = $dataHariIni['selesai_sampel'];
+foreach ($dataHariIniList as $jh) {
+    $totalSampelAktif += (int) $jh['sisa_sampel'];
+    $totalSampelSelesai += (int) $jh['selesai_sampel'];
 }
 
 // History pengujian yang sudah selesai dikerjakan teknisi ini
@@ -123,7 +124,8 @@ $historyList = $historyQuery->fetchAll();
             </div>
         </div>
 
-        <?php if ($dataHariIni): ?>
+        <?php if (!empty($dataHariIniList)): ?>
+        <?php foreach ($dataHariIniList as $dataHariIni): ?>
         <div class="card border-0 shadow-sm mb-4" style="background: linear-gradient(135deg, #7c2d12, #c2410c); color: #fff;">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-center mb-3">
@@ -131,7 +133,7 @@ $historyList = $historyQuery->fetchAll();
                         <small class="opacity-75">Jadwal Hari Ini</small>
                         <h5 class="mb-0"><?= htmlspecialchars($dataHariIni['kode_booking']) ?></h5>
                     </div>
-                    <span class="badge bg-light" style="color: #c2410c;"><?= date('H:i', strtotime($dataHariIni['jam_mulai'])) ?> - <?= date('H:i', strtotime($dataHariIni['jam_selesai'])) ?></span>
+                    <span class="badge bg-light" style="color: #c2410c;"><?= $dataHariIni['jam_mulai'] && $dataHariIni['jam_selesai'] ? date('H:i', strtotime($dataHariIni['jam_mulai'])) . ' - ' . date('H:i', strtotime($dataHariIni['jam_selesai'])) : '-' ?></span>
                 </div>
                 <div class="row g-2">
                     <div class="col-6">
@@ -146,15 +148,16 @@ $historyList = $historyQuery->fetchAll();
                 <div class="mt-3">
                     <div class="d-flex justify-content-between mb-1">
                         <small class="opacity-75">Progres Sampel</small>
-                        <small><strong><?= $totalSampelSelesai ?>/<?= $dataHariIni['total_sampel'] ?></strong></small>
+                        <small><strong><?= (int) $dataHariIni['selesai_sampel'] ?>/<?= (int) $dataHariIni['total_sampel'] ?></strong></small>
                     </div>
                     <div class="progress" style="height: 8px;">
-                        <div class="progress-bar bg-light" style="width: <?= $dataHariIni['total_sampel'] > 0 ? ($totalSampelSelesai/$dataHariIni['total_sampel']*100) : 0 ?>%"></div>
+                        <div class="progress-bar bg-light" style="width: <?= $dataHariIni['total_sampel'] > 0 ? ($dataHariIni['selesai_sampel']/$dataHariIni['total_sampel']*100) : 0 ?>%"></div>
                     </div>
                 </div>
                 <a href="jadwal.php" class="btn btn-light btn-sm mt-3 w-100">Buka Jadwal &rarr;</a>
             </div>
         </div>
+        <?php endforeach; ?>
         <?php else: ?>
         <div class="card border-0 shadow-sm mb-4 text-center py-4">
             <i class="bi bi-calendar-x text-muted" style="font-size: 3rem;"></i>
@@ -204,14 +207,7 @@ $historyList = $historyQuery->fetchAll();
                         <tbody>
                             <?php if (!empty($historyList)): ?>
                                 <?php foreach ($historyList as $h):
-                                    $map = [
-                                        'menunggu_diuji' => ['Menunggu Diuji', 'warning'],
-                                        'sedang_diuji' => ['Sedang Diuji', 'primary'],
-                                        'menunggu_input_admin' => ['Menunggu Input', 'warning'],
-                                        'menunggu_pembayaran' => ['Menunggu Pembayaran', 'warning'],
-                                        'selesai' => ['Selesai', 'success'],
-                                    ];
-                                    [$label, $warna] = $map[$h['status_booking']] ?? [$h['status_booking'], 'secondary'];
+                                    [$label, $warna] = labelStatus($h['status_booking']);
                                 ?>
                                 <tr>
                                     <td><strong style="font-size: 0.8125rem;"><?= htmlspecialchars($h['kode_booking']) ?></strong></td>

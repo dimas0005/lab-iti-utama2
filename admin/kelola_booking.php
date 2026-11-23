@@ -29,6 +29,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     } elseif ($aksi === 'tolak' && $statusSekarang === 'menunggu_verifikasi') {
         $alasan = trim($_POST['alasan_ditolak'] ?? '');
 
+        if ($alasan === '') {
+            $error = 'Alasan penolakan wajib diisi.';
+        } else {
         $stmt = $pdo->prepare("UPDATE bookings SET status_booking = 'ditolak', alasan_ditolak = ?, diverifikasi_oleh = ?, diverifikasi_pada = NOW() WHERE id = ?");
         $stmt->execute([$alasan, $user['id'], $bookingId]);
 
@@ -36,6 +39,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
              ->execute([$bookingId, $user['id'], "Ditolak oleh Admin: $alasan"]);
 
         $success = 'Booking berhasil ditolak.';
+        }
 
     } elseif ($aksi === 'validasi_hasil' && $statusSekarang === 'validasi_hasil') {
         $stmt = $pdo->prepare("UPDATE bookings SET status_booking = 'menunggu_pembayaran' WHERE id = ?");
@@ -90,7 +94,7 @@ if (in_array($filterTipe, ['online', 'offline'])) {
          JOIN jenis_pengujian j ON b.jenis_pengujian_id = j.id
          JOIN users u ON b.user_id = u.id
          WHERE b.tipe_booking = ?
-         ORDER BY b.created_at DESC"
+         ORDER BY b.tanggal_pengujian_diminta ASC, b.created_at DESC"
     );
     $stmt->execute([$filterTipe]);
 } else {
@@ -99,7 +103,7 @@ if (in_array($filterTipe, ['online', 'offline'])) {
          FROM bookings b
          JOIN jenis_pengujian j ON b.jenis_pengujian_id = j.id
          JOIN users u ON b.user_id = u.id
-         ORDER BY b.created_at DESC"
+         ORDER BY b.tanggal_pengujian_diminta ASC, b.created_at DESC"
     );
 }
 $semuaBooking = $stmt->fetchAll();
@@ -116,6 +120,9 @@ require '../config/labels.php';
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="../assets/css/style.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        .aksi-wrap { display: flex; flex-wrap: wrap; gap: 0.25rem; align-items: center; max-width: 200px; }
+    </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-custom navbar-admin">
@@ -209,7 +216,7 @@ require '../config/labels.php';
                                     if ($sp) echo '<br><small class="text-muted">' . htmlspecialchars(implode(' · ', $sp)) . '</small>';
                                     ?>
                                 </td>
-                                <td><?= date('d-m-Y', strtotime($b['tanggal_pengujian_diminta'])) ?></td>
+                                <td><?= $b['tanggal_pengujian_diminta'] ? date('d-m-Y', strtotime($b['tanggal_pengujian_diminta'])) : '-' ?></td>
                                 <td>
                                     <?php if (!empty($b['dokumen_persyaratan'])): ?>
                                         <a href="../<?= htmlspecialchars($b['dokumen_persyaratan']) ?>" target="_blank" class="btn btn-sm btn-outline-primary" title="Lihat Dokumen">
@@ -221,6 +228,7 @@ require '../config/labels.php';
                                 </td>
                                 <td><span class="badge bg-<?= $warna ?>"><?= $label ?></span></td>
                                 <td>
+                                    <div class="aksi-wrap">
                                     <?php if ($b['tipe_booking'] === 'offline' && $b['status_booking'] === 'menunggu_pembayaran'): ?>
                                         <small class="text-muted d-block mb-1" style="font-size: 0.7rem;">Walk-in — Langsung Bayar</small>
                                     <?php endif; ?>
@@ -291,6 +299,8 @@ require '../config/labels.php';
                                         <?php endif; ?>
                                     <?php elseif ($b['status_booking'] === 'menunggu_diuji'): ?>
                                         <span class="badge bg-warning">Menunggu Teknisi</span>
+                                    <?php elseif ($b['status_booking'] === 'sampel_diterima' || $b['status_booking'] === 'sedang_diuji'): ?>
+                                        <span class="badge bg-primary">Sedang Diuji</span>
                                     <?php elseif ($b['status_booking'] === 'menunggu_input_admin'): ?>
                                         <a href="input_nilai.php?booking_id=<?= $b['id'] ?>" class="btn btn-sm btn-primary">Input Nilai</a>
                                     <?php elseif ($b['status_booking'] === 'validasi_hasil'): ?>
@@ -304,6 +314,7 @@ require '../config/labels.php';
                                     <?php elseif ($b['status_booking'] === 'menunggu_pembayaran'): ?>
                                         <a href="verifikasi_pembayaran.php?booking_id=<?= $b['id'] ?>" class="btn btn-sm btn-success"><i class="bi bi-cash"></i> Verifikasi Bayar</a>
                                     <?php endif; ?>
+                                    </div>
                                 </td>
                             </tr>
                         <?php endforeach; ?>

@@ -168,17 +168,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="mb-3">
                         <label class="form-label">Tanggal Jadwal <span class="text-danger">*</span></label>
                         <input type="date" name="tanggal_jadwal" class="form-control"
-                               value="<?= htmlspecialchars($booking['tanggal_pengujian_diminta']) ?>" required>
+                               value="<?= htmlspecialchars($booking['tanggal_pengujian_diminta'] ?? '') ?>" required>
                     </div>
 
                     <div class="row">
                         <div class="col-sm-6 mb-3">
-                            <label class="form-label">Jam Mulai</label>
-                            <input type="time" name="jam_mulai" class="form-control" value="08:00">
+                            <label class="form-label">Jam Mulai <span class="text-danger">*</span></label>
+                            <input type="time" name="jam_mulai" class="form-control" value="08:00" required>
                         </div>
                         <div class="col-sm-6 mb-3">
-                            <label class="form-label">Jam Selesai</label>
-                            <input type="time" name="jam_selesai" class="form-control" value="16:00">
+                            <label class="form-label">Jam Selesai <span class="text-danger">*</span></label>
+                            <input type="time" name="jam_selesai" class="form-control" value="16:00" required>
                         </div>
                     </div>
 

@@ -3,5 +3,11 @@
     Require all denied
 </FilesMatch>
 
+# Block access to git repository (source code + history)
+RedirectMatch 404 (^|/)\.git(/|$)
+<FilesMatch "^\.git">
+    Require all denied
+</FilesMatch>
+
 # Disable directory listing
 Options -Indexes

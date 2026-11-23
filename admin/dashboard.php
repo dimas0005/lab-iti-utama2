@@ -182,7 +182,7 @@ require '../config/labels.php';
                         <tbody>
                             <?php foreach ($pengujianHariIni as $p): ?>
                             <tr>
-                                <td><span class="badge bg-success"><?= date('H:i', strtotime($p['jam_mulai'])) ?> - <?= date('H:i', strtotime($p['jam_selesai'])) ?></span></td>
+                                <td><span class="badge bg-success"><?= $p['jam_mulai'] ? date('H:i', strtotime($p['jam_mulai'])) : '-' ?> - <?= $p['jam_selesai'] ? date('H:i', strtotime($p['jam_selesai'])) : '-' ?></span></td>
                                 <td><strong><?= htmlspecialchars($p['kode_booking']) ?></strong></td>
                                 <td><?= htmlspecialchars($p['nama_pengujian']) ?></td>
                                 <td><?= htmlspecialchars($p['nama_teknisi']) ?></td>

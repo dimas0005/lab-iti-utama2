@@ -20,8 +20,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['tambah_user'])) {
 
     if (!in_array($role, ['pelanggan', 'teknisi', 'admin', 'owner'], true)) {
         $error = 'Role user tidak valid.';
+    } elseif ($namaLengkap === '') {
+        $error = 'Nama lengkap wajib diisi.';
+    } elseif (strlen($namaLengkap) > 150) {
+        $error = 'Nama lengkap maksimal 150 karakter.';
+    } elseif (!preg_match('/[A-Za-z]/', $namaLengkap) || preg_match('/[0-9]/', $namaLengkap)) {
+        $error = 'Nama lengkap hanya boleh berisi huruf (tidak boleh ada angka).';
+    } elseif (strlen($namaPerusahaan) > 150) {
+        $error = 'Nama perusahaan maksimal 150 karakter.';
+    } elseif ($namaPerusahaan !== '' && (!preg_match('/[A-Za-z]/', $namaPerusahaan) || preg_match('/[0-9]/', $namaPerusahaan))) {
+        $error = 'Nama perusahaan hanya boleh berisi huruf (tidak boleh ada angka).';
+    } elseif (strlen($noTelepon) > 20) {
+        $error = 'No. telepon maksimal 20 karakter.';
+    } elseif ($noTelepon !== '' && (!preg_match('/^[0-9\s\-\+]+$/', $noTelepon) || !preg_match('/[0-9]/', $noTelepon))) {
+        $error = 'No. telepon hanya boleh berisi angka (tidak boleh ada huruf).';
     } elseif (filter_var($email, FILTER_VALIDATE_EMAIL) === false) {
-        $error = 'Format email tidak valid.';
+        $error = 'Format email tidak valid. Email boleh berupa kombinasi huruf, angka, dan simbol (@ . _ -).';
     } else {
         $cek = $pdo->prepare("SELECT id FROM users WHERE email = ?");
         $cek->execute([$email]);
@@ -30,6 +44,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['tambah_user'])) {
             $error = 'Email sudah digunakan oleh user lain.';
         } elseif (strlen($password) < 6) {
             $error = 'Password minimal 6 karakter.';
+        } elseif (strlen($password) > 72) {
+            $error = 'Password maksimal 72 karakter.';
         } else {
             $hash = password_hash($password, PASSWORD_BCRYPT);
             $stmt = $pdo->prepare(
@@ -52,23 +68,39 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['edit_user'])) {
 
     if (!csrf_check()) { die('Token CSRF tidak valid. Muat ulang halaman.'); }
 
-    if (!empty($passwordBaru)) {
-        if (strlen($passwordBaru) < 6) {
-            $error = 'Password baru minimal 6 karakter.';
-        } else {
+    if ($namaLengkap === '') {
+        $error = 'Nama lengkap wajib diisi.';
+    } elseif (strlen($namaLengkap) > 150) {
+        $error = 'Nama lengkap maksimal 150 karakter.';
+    } elseif (!preg_match('/[A-Za-z]/', $namaLengkap) || preg_match('/[0-9]/', $namaLengkap)) {
+        $error = 'Nama lengkap hanya boleh berisi huruf (tidak boleh ada angka).';
+    } elseif (strlen($namaPerusahaan) > 150) {
+        $error = 'Nama perusahaan maksimal 150 karakter.';
+    } elseif ($namaPerusahaan !== '' && (!preg_match('/[A-Za-z]/', $namaPerusahaan) || preg_match('/[0-9]/', $namaPerusahaan))) {
+        $error = 'Nama perusahaan hanya boleh berisi huruf (tidak boleh ada angka).';
+    } elseif (strlen($noTelepon) > 20) {
+        $error = 'No. telepon maksimal 20 karakter.';
+    } elseif ($noTelepon !== '' && (!preg_match('/^[0-9\s\-\+]+$/', $noTelepon) || !preg_match('/[0-9]/', $noTelepon))) {
+        $error = 'No. telepon hanya boleh berisi angka (tidak boleh ada huruf).';
+    } elseif (!empty($passwordBaru) && strlen($passwordBaru) < 6) {
+        $error = 'Password baru minimal 6 karakter.';
+    } elseif (!empty($passwordBaru) && strlen($passwordBaru) > 72) {
+        $error = 'Password baru maksimal 72 karakter.';
+    } else {
+        if (!empty($passwordBaru)) {
             $hash = password_hash($passwordBaru, PASSWORD_BCRYPT);
             $stmt = $pdo->prepare(
                 "UPDATE users SET nama_lengkap = ?, nama_perusahaan = ?, no_telepon = ?, password = ? WHERE id = ?"
             );
             $stmt->execute([$namaLengkap, $namaPerusahaan, $noTelepon, $hash, $editId]);
             $success = 'User berhasil diperbarui (termasuk password baru).';
+        } else {
+            $stmt = $pdo->prepare(
+                "UPDATE users SET nama_lengkap = ?, nama_perusahaan = ?, no_telepon = ? WHERE id = ?"
+            );
+            $stmt->execute([$namaLengkap, $namaPerusahaan, $noTelepon, $editId]);
+            $success = 'User berhasil diperbarui.';
         }
-    } else {
-        $stmt = $pdo->prepare(
-            "UPDATE users SET nama_lengkap = ?, nama_perusahaan = ?, no_telepon = ? WHERE id = ?"
-        );
-        $stmt->execute([$namaLengkap, $namaPerusahaan, $noTelepon, $editId]);
-        $success = 'User berhasil diperbarui.';
     }
 }
 
@@ -255,19 +287,22 @@ function labelRole($role) {
                                                         <input type="hidden" name="user_id" value="<?= $u['id'] ?>">
                                                         <div class="mb-3">
                                                             <label class="form-label">Nama Lengkap</label>
-                                                            <input type="text" name="nama_lengkap" class="form-control" value="<?= htmlspecialchars($u['nama_lengkap']) ?>" required>
+                                                            <input type="text" name="nama_lengkap" class="form-control" value="<?= htmlspecialchars($u['nama_lengkap']) ?>" required
+                                                                   pattern="[A-Za-z][^0-9]*" title="Hanya huruf, tidak boleh ada angka">
                                                         </div>
                                                         <?php if ($u['role'] === 'pelanggan'): ?>
                                                         <div class="mb-3">
                                                             <label class="form-label">Nama Perusahaan</label>
-                                                            <input type="text" name="nama_perusahaan" class="form-control" value="<?= htmlspecialchars($u['nama_perusahaan'] ?? '') ?>">
+                                                            <input type="text" name="nama_perusahaan" class="form-control" value="<?= htmlspecialchars($u['nama_perusahaan'] ?? '') ?>"
+                                                                   pattern="[A-Za-z][^0-9]*" title="Hanya huruf, tidak boleh ada angka">
                                                         </div>
                                                         <?php else: ?>
                                                         <input type="hidden" name="nama_perusahaan" value="">
                                                         <?php endif; ?>
                                                         <div class="mb-3">
                                                             <label class="form-label">No. Telepon</label>
-                                                            <input type="text" name="no_telepon" class="form-control" value="<?= htmlspecialchars($u['no_telepon'] ?? '') ?>">
+                                                            <input type="text" name="no_telepon" class="form-control" value="<?= htmlspecialchars($u['no_telepon'] ?? '') ?>"
+                                                                   pattern="[0-9+\-\s]+" title="Hanya angka, tidak boleh ada huruf">
                                                         </div>
                                                         <div class="mb-3">
                                                             <label class="form-label">Email</label>
@@ -322,11 +357,13 @@ function labelRole($role) {
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Nama Lengkap</label>
-                            <input type="text" name="nama_lengkap" class="form-control" required>
+                            <input type="text" name="nama_lengkap" class="form-control" required
+                                   pattern="[A-Za-z][^0-9]*" title="Hanya huruf, tidak boleh ada angka">
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Nama Perusahaan (khusus Pelanggan)</label>
-                            <input type="text" name="nama_perusahaan" class="form-control">
+                            <input type="text" name="nama_perusahaan" class="form-control"
+                                   pattern="[A-Za-z][^0-9]*" title="Hanya huruf, tidak boleh ada angka">
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Email</label>
@@ -334,7 +371,8 @@ function labelRole($role) {
                         </div>
                         <div class="mb-3">
                             <label class="form-label">No. Telepon</label>
-                            <input type="text" name="no_telepon" class="form-control">
+                            <input type="text" name="no_telepon" class="form-control"
+                                   pattern="[0-9+\-\s]+" title="Hanya angka, tidak boleh ada huruf">
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Password</label>

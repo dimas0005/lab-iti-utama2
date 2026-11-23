@@ -11,10 +11,11 @@ $booking = null;
 $historis = null;
 $laporan = null;
 $error = '';
-$kodeInput = trim($_GET['kode'] ?? $_POST['kode'] ?? '');
+$kodeRaw = $_GET['kode'] ?? $_POST['kode'] ?? '';
+$kodeInput = trim(is_string($kodeRaw) ? $kodeRaw : '');
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($kodeInput)) {
-    if (!csrf_check()) { die('Token CSRF tidak valid. Muat ulang halaman.'); }
+if ($kodeInput !== '') {
+    if ($_SERVER['REQUEST_METHOD'] === 'POST' && !csrf_check()) { die('Token CSRF tidak valid. Muat ulang halaman.'); }
 
     $stmtL2 = $pdo->prepare(
         "SELECT l.*, b.*, j.nama_pengujian, j.kategori, u.nama_lengkap as nama_pelanggan, u.nama_perusahaan
@@ -29,6 +30,24 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($kodeInput)) {
     $booking = $stmtL2->fetch();
     if ($booking) {
         $laporan = $booking;
+    }
+
+    if (!$booking) {
+        $stmtB = $pdo->prepare(
+            "SELECT b.*, j.nama_pengujian, j.kategori, u.nama_lengkap as nama_pelanggan, u.nama_perusahaan
+             FROM bookings b
+             JOIN jenis_pengujian j ON b.jenis_pengujian_id = j.id
+             JOIN users u ON b.user_id = u.id
+             WHERE b.kode_booking = ? AND b.user_id = ?
+             LIMIT 1"
+        );
+        $stmtB->execute([$kodeInput, $user['id']]);
+        $booking = $stmtB->fetch();
+        if ($booking) {
+            $stmtL3 = $pdo->prepare("SELECT * FROM laporan WHERE booking_id = ? ORDER BY id DESC LIMIT 1");
+            $stmtL3->execute([$booking['id']]);
+            $laporan = $stmtL3->fetch() ?: null;
+        }
     }
 
     if (!$booking) {
@@ -92,7 +111,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($kodeInput)) {
                 <form method="POST" class="d-flex gap-2">
                     <?= csrf_field() ?>
                     <input type="text" name="kode" class="form-control" required
-                           placeholder="Nomor Laporan"
+                           placeholder="Nomor Laporan atau Kode Booking"
                            value="<?= htmlspecialchars($kodeInput) ?>">
                     <button type="submit" class="btn btn-primary px-4">
                         <i class="bi bi-check-circle"></i> Validasi
@@ -138,7 +157,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($kodeInput)) {
                         <?php endif; ?>
                     </h5>
                     <p class="text-muted mb-0" style="font-size: 0.875rem;">
-                        Nomor Laporan: <strong><?= htmlspecialchars($booking['nomor_laporan'] ?? '-') ?></strong>
+                        Nomor Laporan: <strong><?= htmlspecialchars($laporan['nomor_laporan'] ?? $booking['nomor_laporan'] ?? '-') ?></strong>
                     </p>
                 </div>
             </div>
@@ -173,7 +192,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && !empty($kodeInput)) {
                         </tr>
                         <tr>
                             <td class="text-muted">Tanggal Terbit</td>
-                            <td><?= date('d-m-Y', strtotime($laporan['tanggal_terbit'])) ?></td>
+                            <td><?= $laporan['tanggal_terbit'] ? date('d-m-Y', strtotime($laporan['tanggal_terbit'])) : '-' ?></td>
                         </tr>
                         <tr>
                             <td class="text-muted">Laporan</td>

@@ -11,8 +11,7 @@ $tanggalHari = $hari[date('w')] . ', ' . date('d') . ' ' . $bulanArr[date('m')-1
 $totalBooking = $pdo->query("SELECT COUNT(*) FROM bookings")->fetchColumn();
 $totalSelesai = $pdo->query("SELECT COUNT(*) FROM bookings WHERE status_booking = 'selesai'")->fetchColumn();
 $totalBerjalan = $pdo->query(
-    "SELECT COUNT(*) FROM bookings WHERE status_booking IN
-     ('booking_diterima','jadwal_ditentukan','menunggu_diuji','sedang_diuji','menunggu_input_admin')"
+    "SELECT COUNT(*) FROM bookings WHERE status_booking NOT IN ('selesai', 'ditolak')"
 )->fetchColumn();
 
 $totalPendapatan = $pdo->query(
@@ -26,13 +25,22 @@ $pendapatanBulanIni = $pdo->query(
 $stmtPerBulan = $pdo->query(
     "SELECT DATE_FORMAT(created_at, '%Y-%m') as bulan, COUNT(*) as jumlah
      FROM bookings
-     WHERE created_at >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+     WHERE created_at >= DATE_FORMAT(DATE_SUB(CURDATE(), INTERVAL 5 MONTH), '%Y-%m-01')
      GROUP BY bulan
      ORDER BY bulan ASC"
 );
 $dataPerBulan = $stmtPerBulan->fetchAll();
-$labelBulan = array_column($dataPerBulan, 'bulan');
-$jumlahBulan = array_column($dataPerBulan, 'jumlah');
+
+// Bucket 6 bulan penuh (bulan tanpa booking tetap tampil agar sumbu chart benar)
+$mapJumlahBulan = array_column($dataPerBulan, 'jumlah', 'bulan');
+$labelBulan = [];
+$jumlahBulan = [];
+$baseBulan = date('Y-m-01');
+for ($i = 5; $i >= 0; $i--) {
+    $key = date('Y-m', strtotime("$baseBulan -$i month"));
+    $labelBulan[] = $key;
+    $jumlahBulan[] = (int) ($mapJumlahBulan[$key] ?? 0);
+}
 
 $bulanMap = ['01'=>'Jan','02'=>'Feb','03'=>'Mar','04'=>'Apr','05'=>'Mei','06'=>'Jun','07'=>'Jul','08'=>'Agu','09'=>'Sep','10'=>'Okt','11'=>'Nov','12'=>'Des'];
 $labelBulanPretty = array_map(function($b) use ($bulanMap) {

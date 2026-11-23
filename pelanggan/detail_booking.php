@@ -145,7 +145,7 @@ $statusSaatIni = $booking['status_booking'];
                     <?php endif; ?>
                     <div class="col-sm-6">
                         <small class="text-muted d-block">Tanggal Pengujian</small>
-                        <strong><?= date('d F Y', strtotime($booking['tanggal_pengujian_diminta'])) ?></strong>
+                        <strong><?= $booking['tanggal_pengujian_diminta'] ? date('d F Y', strtotime($booking['tanggal_pengujian_diminta'])) : '-' ?></strong>
                     </div>
                     <div class="col-sm-6">
                         <small class="text-muted d-block">Estimasi Biaya</small>
@@ -203,7 +203,7 @@ $statusSaatIni = $booking['status_booking'];
                             </p>
                             <?php if (isset($statusTercapai[$key])): ?>
                                 <small class="text-muted">
-                                    <?= date('d M Y, H:i', strtotime($statusTercapai[$key]['created_at'])) ?>
+                                    <?= $statusTercapai[$key]['created_at'] ? date('d M Y, H:i', strtotime($statusTercapai[$key]['created_at'])) : '-' ?>
                                     <?php if ($statusTercapai[$key]['keterangan']): ?>
                                         &mdash; <?= htmlspecialchars($statusTercapai[$key]['keterangan']) ?>
                                     <?php endif; ?>
@@ -243,6 +243,16 @@ $statusSaatIni = $booking['status_booking'];
                 </div>
             </div>
         <?php elseif ($statusSaatIni === 'menunggu_pembayaran' && $tipeBooking === 'online'): ?>
+            <?php if (!empty($booking['alasan_ditolak'])): ?>
+            <div class="alert alert-warning d-flex align-items-start gap-2" role="alert">
+                <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+                <div>
+                    <strong>Bukti transfer Anda ditolak oleh Admin.</strong>
+                    <p class="mb-0 mt-1">Alasan: <?= htmlspecialchars($booking['alasan_ditolak']) ?></p>
+                    <p class="mb-0 mt-2">Silakan perbaiki dan unggah ulang bukti transfer.</p>
+                </div>
+            </div>
+            <?php endif; ?>
             <div class="card mb-3">
                 <div class="card-body text-center">
                     <p class="mb-2" style="font-size: 0.9375rem;">Pengujian telah selesai. Silakan melakukan pembayaran sebesar:</p>

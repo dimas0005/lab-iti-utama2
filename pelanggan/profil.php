@@ -17,6 +17,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $noTelepon = trim($_POST['no_telepon'] ?? '');
         $alamat = trim($_POST['alamat'] ?? '');
 
+        if ($namaLengkap === '') {
+            $error = 'Nama lengkap wajib diisi.';
+        } elseif (strlen($namaLengkap) > 150) {
+            $error = 'Nama lengkap maksimal 150 karakter.';
+        } elseif (!preg_match('/[A-Za-z]/', $namaLengkap) || preg_match('/[0-9]/', $namaLengkap)) {
+            $error = 'Nama lengkap hanya boleh berisi huruf (tidak boleh ada angka).';
+        } elseif (strlen($namaPerusahaan) > 150) {
+            $error = 'Nama perusahaan maksimal 150 karakter.';
+        } elseif ($namaPerusahaan !== '' && (!preg_match('/[A-Za-z]/', $namaPerusahaan) || preg_match('/[0-9]/', $namaPerusahaan))) {
+            $error = 'Nama perusahaan hanya boleh berisi huruf (tidak boleh ada angka).';
+        } elseif (strlen($noTelepon) > 20) {
+            $error = 'No. telepon maksimal 20 karakter.';
+        } elseif ($noTelepon !== '' && (!preg_match('/^[0-9\s\-\+]+$/', $noTelepon) || !preg_match('/[0-9]/', $noTelepon))) {
+            $error = 'No. telepon hanya boleh berisi angka (tidak boleh ada huruf).';
+        } else {
         $fotoPath = $user['foto_profil'];
         if (isset($_FILES['foto_profil']) && ($_FILES['foto_profil']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
             $ext = strtolower(pathinfo($_FILES['foto_profil']['name'], PATHINFO_EXTENSION));
@@ -45,6 +60,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
 
         if (!$error) {
+            if ($fotoPath !== $user['foto_profil'] && !empty($user['foto_profil']) && file_exists('../' . $user['foto_profil'])) {
+                unlink('../' . $user['foto_profil']);
+            }
             $stmt = $pdo->prepare(
                 "UPDATE users SET nama_lengkap = ?, nama_perusahaan = ?, no_telepon = ?, alamat = ?, foto_profil = ?
                  WHERE id = ?"
@@ -54,6 +72,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $success = 'Profil berhasil diperbarui.';
             $user = currentUser($pdo);
             $_SESSION['user_name'] = $namaLengkap;
+        }
         }
     }
 
@@ -68,6 +87,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $error = 'Konfirmasi password baru tidak cocok.';
         } elseif (strlen($passwordBaru) < 6) {
             $error = 'Password baru minimal 6 karakter.';
+        } elseif (strlen($passwordBaru) > 72) {
+            $error = 'Password baru maksimal 72 karakter.';
         } else {
             $hashBaru = password_hash($passwordBaru, PASSWORD_BCRYPT);
             $stmt = $pdo->prepare("UPDATE users SET password = ? WHERE id = ?");
@@ -86,6 +107,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="../assets/css/style.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-custom navbar-pelanggan">

@@ -91,7 +91,7 @@ require '../config/labels.php';
                                     </td>
                                     <td><?= htmlspecialchars($b['nama_pengujian']) ?></td>
                                     <td class="d-none d-sm-table-cell"><?= $b['jumlah_sampel'] ?></td>
-                                    <td class="d-none d-md-table-cell"><?= date('d-m-Y', strtotime($b['tanggal_pengujian_diminta'])) ?></td>
+                                    <td class="d-none d-md-table-cell"><?= $b['tanggal_pengujian_diminta'] ? date('d-m-Y', strtotime($b['tanggal_pengujian_diminta'])) : '-' ?></td>
                                     <td class="d-none d-lg-table-cell">Rp <?= number_format($b['estimasi_biaya'], 0, ',', '.') ?></td>
                                     <td><span class="badge bg-<?= $warna ?>"><?= $label ?></span></td>
                                     <td>

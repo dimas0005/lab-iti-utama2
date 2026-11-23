@@ -17,6 +17,8 @@ $stmtPelanggan = $pdo->query("SELECT id, nama_lengkap, nama_perusahaan, email, n
 $daftarPelanggan = $stmtPelanggan->fetchAll();
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $_POST = array_map(function ($v) { return is_array($v) ? '' : $v; }, $_POST);
+
     $pilihPelanggan = trim($_POST['pilih_pelanggan'] ?? '');
     $namaLengkap = trim($_POST['nama_lengkap'] ?? '');
     $namaPerusahaan = trim($_POST['nama_perusahaan'] ?? '');
@@ -47,18 +49,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
     if (!csrf_check()) { die('Token CSRF tidak valid. Muat ulang halaman.'); }
 
-    $passwordSementara = '';
     $pelangganId = 0;
+    $buatUserBaru = false;
 
     if ($pilihPelanggan === '') {
         $error = 'Pilih pelanggan terlebih dahulu.';
     } elseif ($pilihPelanggan === 'baru') {
         if ($namaLengkap === '' || $noTelepon === '' || $email === '') {
             $error = 'Nama lengkap, no. telepon, dan email pelanggan baru wajib diisi.';
-        } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
-            $error = 'Format email pelanggan baru tidak valid.';
+        } elseif (strlen($namaLengkap) > 150) {
+            $error = 'Nama lengkap maksimal 150 karakter.';
+        } elseif (!preg_match('/[A-Za-z]/', $namaLengkap) || preg_match('/[0-9]/', $namaLengkap)) {
+            $error = 'Nama lengkap hanya boleh berisi huruf (tidak boleh ada angka).';
+        } elseif (strlen($namaPerusahaan) > 150) {
+            $error = 'Nama perusahaan maksimal 150 karakter.';
+        } elseif ($namaPerusahaan !== '' && (!preg_match('/[A-Za-z]/', $namaPerusahaan) || preg_match('/[0-9]/', $namaPerusahaan))) {
+            $error = 'Nama perusahaan hanya boleh berisi huruf (tidak boleh ada angka).';
+        } elseif (strlen($noTelepon) > 20) {
+            $error = 'No. telepon maksimal 20 karakter.';
+        } elseif (!preg_match('/^[0-9\s\-\+]+$/', $noTelepon) || !preg_match('/[0-9]/', $noTelepon)) {
+            $error = 'No. telepon hanya boleh berisi angka (tidak boleh ada huruf).';
+        } elseif (strlen($email) > 150 || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+            $error = 'Format email pelanggan baru tidak valid. Email boleh berupa kombinasi huruf, angka, dan simbol (@ . _ -).';
         } elseif ($passwordBaru === '' || strlen($passwordBaru) < 6) {
             $error = 'Password pelanggan baru wajib diisi, minimal 6 karakter.';
+        } elseif (strlen($passwordBaru) > 72) {
+            $error = 'Password pelanggan baru maksimal 72 karakter.';
         } else {
             $cekEmail = $pdo->prepare("SELECT id FROM users WHERE email = ?");
             $cekEmail->execute([$email]);
@@ -66,15 +82,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($cekEmail->fetch()) {
                 $error = 'Email tersebut sudah terdaftar. Pilih pelanggannya dari daftar.';
             } else {
-                $passwordSementara = $passwordBaru;
-                $hash = password_hash($passwordSementara, PASSWORD_BCRYPT);
-
-                $stmtBuatUser = $pdo->prepare(
-                    "INSERT INTO users (role, nama_lengkap, nama_perusahaan, email, no_telepon, password, status_aktif)
-                     VALUES ('pelanggan', ?, ?, ?, ?, ?, 1)"
-                );
-                $stmtBuatUser->execute([$namaLengkap, $namaPerusahaan, $email, $noTelepon, $hash]);
-                $pelangganId = (int) $pdo->lastInsertId();
+                // User baru dibuat belakangan, setelah seluruh validasi booking lolos
+                $buatUserBaru = true;
             }
         }
     } else {
@@ -98,14 +107,54 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $error = 'Jenis pengujian tidak valid.';
     } elseif ($penanggungJawab === '') {
         $error = 'Nama penanggung jawab wajib diisi.';
+    } elseif (!preg_match('/^[A-Za-z]/', $penanggungJawab)) {
+        $error = 'Nama penanggung jawab harus diawali dengan huruf. Angka hanya boleh setelah huruf.';
+    } elseif ($objekPengujian === '') {
+        $error = 'Nama proyek wajib diisi.';
+    } elseif (!preg_match('/^[A-Za-z]/', $objekPengujian)) {
+        $error = 'Nama proyek harus diawali dengan huruf. Angka hanya boleh setelah huruf.';
+    } elseif ($lokasi === '') {
+        $error = 'Lokasi wajib diisi.';
+    } elseif (!preg_match('/^[A-Za-z]/', $lokasi)) {
+        $error = 'Lokasi harus diawali dengan huruf. Angka hanya boleh setelah huruf.';
+    } elseif ($supplier === '') {
+        $error = 'Supplier wajib diisi.';
+    } elseif (!preg_match('/^[A-Za-z]/', $supplier)) {
+        $error = 'Supplier harus diawali dengan huruf. Angka hanya boleh setelah huruf.';
     } elseif (!tanggalValid($tanggalPengujian)) {
         $error = 'Tanggal pengujian tidak valid.';
+    } elseif (strtotime($tanggalPengujian) < strtotime(date('Y-m-d'))) {
+        $error = 'Tanggal pengujian tidak boleh di masa lalu.';
     } elseif ($jenis['kategori'] === 'beton' && !in_array($mutuBeton, $daftarMutu, true)) {
         $error = 'Mutu beton wajib dipilih.';
     } elseif ($jumlahSampel < 1) {
         $error = 'Jumlah sampel minimal 1.';
     } elseif ($jumlahSampel < $minSampel) {
         $error = 'Untuk pengujian "' . $jenis['nama_pengujian'] . '", jumlah sampel minimal ' . $minSampel . ' pcs.';
+    }
+
+    if (!$error) {
+        $butuhSample = [];
+        if (isUjiSilinder($jenis['nama_pengujian'])) {
+            $butuhSample = ['sample_berat' => 'Berat', 'sample_diameter' => 'Diameter', 'sample_tinggi' => 'Tinggi'];
+        } elseif (isUjiKubus($jenis['nama_pengujian']) || isUjiPaving($jenis['nama_pengujian'])) {
+            $butuhSample = ['sample_berat' => 'Berat'];
+        } elseif (isUjiLentur($jenis['nama_pengujian'])) {
+            $butuhSample = ['sample_bentang_l' => 'Bentang L', 'sample_dimensi_b' => 'Dimensi b', 'sample_dimensi_h' => 'Dimensi h'];
+        } elseif (isUjiCoreDrill($jenis['nama_pengujian'])) {
+            $butuhSample = ['sample_diameter' => 'Diameter', 'sample_tinggi' => 'Tinggi'];
+        } elseif ($jenis['kategori'] === 'besi') {
+            $butuhSample = ['sample_diameter' => 'Diameter', 'sample_jenis_baja' => 'Jenis Baja', 'sample_panjang' => 'Panjang'];
+        }
+        $kosongSample = [];
+        foreach ($butuhSample as $kolom => $label) {
+            if (trim((string) ($_POST[$kolom] ?? '')) === '') {
+                $kosongSample[] = $label;
+            }
+        }
+        if ($kosongSample) {
+            $error = 'Spesifikasi sampel wajib diisi: ' . implode(', ', $kosongSample) . '.';
+        }
     }
     }
 
@@ -137,37 +186,73 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $statusAwal = 'menunggu_verifikasi';
 
-        $stmtBooking = $pdo->prepare(
-            "INSERT INTO bookings
-             (kode_booking, user_id, jenis_pengujian_id, penanggung_jawab, jumlah_sampel,
-              tanggal_pengujian_diminta, estimasi_biaya, catatan_pelanggan, objek_pengujian, lokasi, supplier, mutu_beton, tambahan_cetak, tambahan_setting, tipe_booking, status_booking,
-              sample_berat, sample_diameter, sample_tinggi, sample_bentang_l, sample_dimensi_b, sample_dimensi_h, sample_jenis_baja, sample_panjang,
-              diverifikasi_oleh, diverifikasi_pada)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())"
-        );
-        $stmtBooking->execute([
-            $kodeBooking, $pelangganId, $jenisPengujianId, $penanggungJawab,
-            $jumlahSampel, $tanggalPengujian, $estimasiBiaya, $catatan, $objekPengujian, $lokasi, $supplier,
-            ($jenis['kategori'] === 'beton' ? $mutuBeton : null),
-            $pakaiCetak, $pakaiSetting, $tipeBooking, $statusAwal,
-            $sampleBerat, $sampleDiameter, $sampleTinggi, $sampleBentangL, $sampleDimB, $sampleDimH, $sampleJenisBaja, $samplePanjang,
-            $user['id']
-        ]);
-        $bookingId = $pdo->lastInsertId();
+        $pdo->beginTransaction();
+        try {
+            if ($buatUserBaru) {
+                $hash = password_hash($passwordBaru, PASSWORD_BCRYPT);
+                $stmtBuatUser = $pdo->prepare(
+                    "INSERT INTO users (role, nama_lengkap, nama_perusahaan, email, no_telepon, password, status_aktif)
+                     VALUES ('pelanggan', ?, ?, ?, ?, ?, 1)"
+                );
+                $stmtBuatUser->execute([$namaLengkap, $namaPerusahaan, $email, $noTelepon, $hash]);
+                $pelangganId = (int) $pdo->lastInsertId();
+            }
 
-        $keteranganRiwayat = ($tipeBooking === 'online')
-            ? 'Booking online dibuat oleh Admin. Menunggu verifikasi.'
-            : 'Booking offline dibuat oleh Admin. Menunggu verifikasi.';
+            $stmtBooking = $pdo->prepare(
+                "INSERT INTO bookings
+                 (kode_booking, user_id, jenis_pengujian_id, penanggung_jawab, jumlah_sampel,
+                  tanggal_pengujian_diminta, estimasi_biaya, catatan_pelanggan, objek_pengujian, lokasi, supplier, mutu_beton, tambahan_cetak, tambahan_setting, tipe_booking, status_booking,
+                  sample_berat, sample_diameter, sample_tinggi, sample_bentang_l, sample_dimensi_b, sample_dimensi_h, sample_jenis_baja, sample_panjang)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            );
+            $paramsBooking = [
+                $kodeBooking, $pelangganId, $jenisPengujianId, $penanggungJawab,
+                $jumlahSampel, $tanggalPengujian, $estimasiBiaya, $catatan, $objekPengujian, $lokasi, $supplier,
+                ($jenis['kategori'] === 'beton' ? $mutuBeton : null),
+                $pakaiCetak, $pakaiSetting, $tipeBooking, $statusAwal,
+                $sampleBerat, $sampleDiameter, $sampleTinggi, $sampleBentangL, $sampleDimB, $sampleDimH, $sampleJenisBaja, $samplePanjang
+            ];
+            for ($coba = 0; $coba < 3; $coba++) {
+                try {
+                    $stmtBooking->execute($paramsBooking);
+                    break;
+                } catch (PDOException $e) {
+                    if ((int) $e->getCode() !== 1062 || $coba === 2) { throw $e; }
+                    // Kode booking bentrok (UNIQUE), coba dengan kode baru
+                    $kodeBooking = generateKodeBooking($pdo, $jenisPengujianId, $jenis['nama_pengujian'], $jenis['kategori']);
+                    $paramsBooking[0] = $kodeBooking;
+                }
+            }
+            $bookingId = $pdo->lastInsertId();
 
-        $stmtRiwayat = $pdo->prepare(
-            "INSERT INTO riwayat_status (booking_id, status, diubah_oleh, keterangan) VALUES (?, ?, ?, ?)"
-        );
-        $stmtRiwayat->execute([$bookingId, $statusAwal, $user['id'], $keteranganRiwayat]);
+            $keteranganRiwayat = ($tipeBooking === 'online')
+                ? 'Booking online dibuat oleh Admin. Menunggu verifikasi.'
+                : 'Booking offline dibuat oleh Admin. Menunggu verifikasi.';
 
-        $success = "Booking berhasil dibuat dengan kode: $kodeBooking.";
-        if ($passwordSementara) {
-            $success .= " Akun pelanggan baru dibuat untuk $email. Password sudah Anda tentukan saat input.";
+            $stmtRiwayat = $pdo->prepare(
+                "INSERT INTO riwayat_status (booking_id, status, diubah_oleh, keterangan) VALUES (?, ?, ?, ?)"
+            );
+            $stmtRiwayat->execute([$bookingId, $statusAwal, $user['id'], $keteranganRiwayat]);
+
+            $pdo->commit();
+        } catch (PDOException $e) {
+            $pdo->rollBack();
+            error_log('booking_manual gagal: ' . $e->getMessage());
+            $error = 'Gagal menyimpan booking. Silakan coba lagi.';
         }
+
+        if (!$error) {
+            header('Location: booking_manual.php?msg=ok&kode=' . urlencode($kodeBooking) . ($buatUserBaru ? '&baru=1' : ''));
+            exit;
+        }
+    }
+}
+
+if (isset($_GET['msg']) && $_GET['msg'] === 'ok') {
+    $kodeBaru = preg_replace('/[^A-Za-z0-9\-]/', '', $_GET['kode'] ?? '');
+    $success = "Booking berhasil dibuat dengan kode: $kodeBaru.";
+    if (($_GET['baru'] ?? '') === '1') {
+        $success .= ' Akun pelanggan baru juga dibuat (password sudah Anda tentukan saat input).';
     }
 }
 ?>
@@ -184,6 +269,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link href="../assets/css/style.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <style>
+        .is-invalid-custom { border-color: #dc3545 !important; box-shadow: 0 0 0 0.2rem rgba(220,53,69,.15) !important; }
+        .is-invalid-custom:focus { border-color: #dc3545 !important; box-shadow: 0 0 0 0.2rem rgba(220,53,69,.25) !important; }
+        @keyframes shakeErr { 0%,100%{transform:translateX(0)} 20%,60%{transform:translateX(-4px)} 40%,80%{transform:translateX(4px)} }
+        .shake-err { animation: shakeErr .3s ease; }
+        .isi-info { position:fixed; bottom:20px; right:20px; z-index:1050; }
+    </style>
 </head>
 <body>
     <nav class="navbar navbar-expand-lg navbar-custom navbar-admin">
@@ -227,14 +319,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <label class="form-label">Tipe Booking</label>
                         <div class="d-flex gap-3">
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="tipe_booking" id="tipeOnline" value="online">
+                                <input class="form-check-input" type="radio" name="tipe_booking" id="tipeOnline" value="online"<?= (($_POST['tipe_booking'] ?? 'offline') === 'online') ? ' checked' : '' ?>>
                                 <label class="form-check-label" for="tipeOnline">
                                     <i class="bi bi-globe text-success"></i> <strong>Online</strong>
                                     <br><small class="text-muted">Perlu verifikasi admin</small>
                                 </label>
                             </div>
                             <div class="form-check">
-                                <input class="form-check-input" type="radio" name="tipe_booking" id="tipeOffline" value="offline" checked>
+                                <input class="form-check-input" type="radio" name="tipe_booking" id="tipeOffline" value="offline"<?= (($_POST['tipe_booking'] ?? 'offline') === 'online') ? '' : ' checked' ?>>
                                 <label class="form-check-label" for="tipeOffline">
                                     <i class="bi bi-building text-info"></i> <strong>Offline (Walk-in)</strong>
                                     <br><small class="text-muted">Bayar di loket</small>
@@ -247,7 +339,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <select name="pilih_pelanggan" id="pilihPelanggan" class="form-select" required>
                             <option value="">-- Pilih pelanggan --</option>
                             <?php foreach ($daftarPelanggan as $p): ?>
-                            <option value="<?= (int) $p['id'] ?>"
+                            <option value="<?= (int) $p['id'] ?>"<?= ((string) ($_POST['pilih_pelanggan'] ?? '') === (string) $p['id']) ? ' selected' : '' ?>
                                 data-nama="<?= htmlspecialchars($p['nama_lengkap']) ?>"
                                 data-perusahaan="<?= htmlspecialchars($p['nama_perusahaan'] ?? '') ?>"
                                 data-telepon="<?= htmlspecialchars($p['no_telepon'] ?? '') ?>"
@@ -255,7 +347,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                                 <?= htmlspecialchars($p['nama_lengkap']) ?><?= !empty($p['nama_perusahaan']) ? ' &mdash; ' . htmlspecialchars($p['nama_perusahaan']) : '' ?>
                             </option>
                             <?php endforeach; ?>
-                            <option value="baru">+ Buat pelanggan baru (diisi admin)</option>
+                            <option value="baru"<?= (($_POST['pilih_pelanggan'] ?? '') === 'baru') ? ' selected' : '' ?>>+ Buat pelanggan baru (diisi admin)</option>
                         </select>
                         <small class="text-muted">Kalau pelanggan belum terdaftar, pilih &ldquo;Buat pelanggan baru&rdquo;.</small>
                     </div>
@@ -272,26 +364,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="d-none" id="rowPelangganBaru">
                         <div class="mb-3">
                             <label class="form-label">Nama Lengkap <span class="text-danger">*</span></label>
-                            <input type="text" name="nama_lengkap" class="form-control wajib" placeholder="Masukkan nama lengkap">
+                            <input type="text" name="nama_lengkap" class="form-control wajib" placeholder="Masukkan nama lengkap"
+                                   value="<?= htmlspecialchars($_POST['nama_lengkap'] ?? '') ?>"
+                                   pattern="[A-Za-z][^0-9]*" title="Hanya huruf, tidak boleh ada angka">
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Nama Perusahaan</label>
-                            <input type="text" name="nama_perusahaan" class="form-control" placeholder="Masukkan nama perusahaan (opsional)">
+                            <input type="text" name="nama_perusahaan" class="form-control" placeholder="Masukkan nama perusahaan (opsional)"
+                                   value="<?= htmlspecialchars($_POST['nama_perusahaan'] ?? '') ?>"
+                                   pattern="[A-Za-z][^0-9]*" title="Hanya huruf, tidak boleh ada angka">
                         </div>
                         <div class="row">
                             <div class="col-sm-6 mb-3">
                                 <label class="form-label">No. Telepon <span class="text-danger">*</span></label>
-                                <input type="text" name="no_telepon" class="form-control wajib" placeholder="08xxxxxxxxxx">
+                                <input type="text" name="no_telepon" class="form-control wajib" placeholder="08xxxxxxxxxx"
+                                       value="<?= htmlspecialchars($_POST['no_telepon'] ?? '') ?>"
+                                       pattern="[0-9+\-\s]+" title="Hanya angka, tidak boleh ada huruf">
                             </div>
                             <div class="col-sm-6 mb-3">
                                 <label class="form-label">Email <span class="text-danger">*</span></label>
                                 <input type="email" name="email" class="form-control wajib"
+                                       value="<?= htmlspecialchars($_POST['email'] ?? '') ?>"
                                        placeholder="Masukkan email pelanggan" autocomplete="off">
                             </div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Password <span class="text-danger">*</span></label>
-                            <input type="text" name="password_baru" class="form-control wajib"
+                            <input type="password" name="password_baru" class="form-control wajib"
                                    placeholder="Password yang dipakai pelanggan login" minlength="6" autocomplete="off">
                             <small class="text-muted">Min. 6 karakter</small>
                         </div>
@@ -310,7 +409,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                             <?php $kat = ''; foreach ($daftarJenis as $j):
                                 if ($kat !== $j['kategori']) { if ($kat !== '') echo '</optgroup>'; echo '<optgroup label="' . strtoupper($j['kategori']) . '">'; $kat = $j['kategori']; }
                             ?>
-                                <option value="<?= $j['id'] ?>" data-harga="<?= $j['harga'] ?>" data-kategori="<?= $j['kategori'] ?>" data-min="<?= minSampelPengujian($j['nama_pengujian'], $j['kategori']) ?>"<?= isCoreDrillUji($j['nama_pengujian']) ? ' data-tambahan="cetak"' : '' ?><?= isUjiSilinder($j['nama_pengujian']) ? ' data-tipe="silinder"' : '' ?><?= isUjiKubus($j['nama_pengujian']) ? ' data-tipe="kubus"' : '' ?><?= isUjiPaving($j['nama_pengujian']) ? ' data-tipe="paving"' : '' ?><?= isUjiLentur($j['nama_pengujian']) ? ' data-tipe="lentur"' : '' ?><?= isUjiCoreDrill($j['nama_pengujian']) ? ' data-tipe="core"' : '' ?>>
+                                <option value="<?= $j['id'] ?>"<?= (($_POST['jenis_pengujian_id'] ?? '') !== '' && (string) $_POST['jenis_pengujian_id'] === (string) $j['id']) ? ' selected' : '' ?> data-harga="<?= $j['harga'] ?>" data-kategori="<?= $j['kategori'] ?>" data-min="<?= minSampelPengujian($j['nama_pengujian'], $j['kategori']) ?>"<?= isCoreDrillUji($j['nama_pengujian']) ? ' data-tambahan="cetak"' : '' ?><?= isUjiSilinder($j['nama_pengujian']) ? ' data-tipe="silinder"' : '' ?><?= isUjiKubus($j['nama_pengujian']) ? ' data-tipe="kubus"' : '' ?><?= isUjiPaving($j['nama_pengujian']) ? ' data-tipe="paving"' : '' ?><?= isUjiLentur($j['nama_pengujian']) ? ' data-tipe="lentur"' : '' ?><?= isUjiCoreDrill($j['nama_pengujian']) ? ' data-tipe="core"' : '' ?>>
                                     <?= htmlspecialchars($j['nama_pengujian']) ?> (Rp <?= number_format($j['harga'],0,',','.') ?>/<?= $j['satuan_sampel'] ?>)
                                 </option>
                             <?php endforeach; ?>
@@ -320,11 +419,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="row">
                         <div class="col-sm-6 mb-3">
                             <label class="form-label">Penanggung Jawab</label>
-                            <input type="text" name="penanggung_jawab" class="form-control" required placeholder="Nama penanggung jawab">
+                            <input type="text" name="penanggung_jawab" class="form-control" required
+                                   value="<?= htmlspecialchars($_POST['penanggung_jawab'] ?? '') ?>"
+                                   pattern="[A-Za-z].*" title="Harus diawali dengan huruf"
+                                   placeholder="Nama penanggung jawab">
                         </div>
                         <div class="col-sm-6 mb-3">
                             <label class="form-label">Jumlah Sampel</label>
-                            <input type="number" name="jumlah_sampel" id="jumlahSampel" class="form-control" min="1" value="1" required>
+                            <input type="number" name="jumlah_sampel" id="jumlahSampel" class="form-control" min="1" value="<?= htmlspecialchars($_POST['jumlah_sampel'] ?? '1') ?>" required>
                             <small class="text-muted" id="hintMinSampel"></small>
                         </div>
                     </div>
@@ -333,7 +435,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <select name="mutu_beton" id="mutuBeton" class="form-select">
                             <option value="">-- Pilih Mutu --</option>
                             <?php foreach ($daftarMutu as $m): ?>
-                            <option value="<?= $m ?>"><?= $m ?></option>
+                            <option value="<?= $m ?>"<?= (($_POST['mutu_beton'] ?? '') === $m) ? ' selected' : '' ?>><?= $m ?></option>
                             <?php endforeach; ?>
                         </select>
                         <small class="text-muted">Wajib dipilih untuk pengujian beton.</small>
@@ -346,43 +448,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         <div class="row">
                             <div class="col-sm-4 mb-3 d-none" id="spBerat">
                                 <label class="form-label" style="font-size:0.8rem;" id="spBeratLabel">Berat (Kg)</label>
-                                <input type="number" step="0.01" name="sample_berat" class="form-control form-control-sm" placeholder="Berat sampel">
+                                <input type="number" step="0.01" name="sample_berat" class="form-control form-control-sm" placeholder="Berat sampel" value="<?= htmlspecialchars($_POST['sample_berat'] ?? '') ?>">
                             </div>
                             <div class="col-sm-4 mb-3 d-none" id="spDiameter">
                                 <label class="form-label" style="font-size:0.8rem;" id="spDiameterLabel">Diameter (mm)</label>
-                                <input type="number" step="0.01" name="sample_diameter" class="form-control form-control-sm" placeholder="Diameter">
+                                <input type="number" step="0.01" name="sample_diameter" class="form-control form-control-sm" placeholder="Diameter" value="<?= htmlspecialchars($_POST['sample_diameter'] ?? '') ?>">
                             </div>
                             <div class="col-sm-4 mb-3 d-none" id="spTinggi">
                                 <label class="form-label" style="font-size:0.8rem;" id="spTinggiLabel">Tinggi (mm)</label>
-                                <input type="number" step="0.01" name="sample_tinggi" class="form-control form-control-sm" placeholder="Tinggi">
+                                <input type="number" step="0.01" name="sample_tinggi" class="form-control form-control-sm" placeholder="Tinggi" value="<?= htmlspecialchars($_POST['sample_tinggi'] ?? '') ?>">
                             </div>
                         </div>
                         <div class="row">
                             <div class="col-sm-4 mb-3 d-none" id="spBentang">
                                 <label class="form-label" style="font-size:0.8rem;">Bentang L (Cm)</label>
-                                <input type="number" step="0.01" name="sample_bentang_l" class="form-control form-control-sm" placeholder="Bentang L">
+                                <input type="number" step="0.01" name="sample_bentang_l" class="form-control form-control-sm" placeholder="Bentang L" value="<?= htmlspecialchars($_POST['sample_bentang_l'] ?? '') ?>">
                             </div>
                             <div class="col-sm-4 mb-3 d-none" id="spDimB">
                                 <label class="form-label" style="font-size:0.8rem;">Dimensi b (Cm)</label>
-                                <input type="number" step="0.01" name="sample_dimensi_b" class="form-control form-control-sm" placeholder="Dimensi b">
+                                <input type="number" step="0.01" name="sample_dimensi_b" class="form-control form-control-sm" placeholder="Dimensi b" value="<?= htmlspecialchars($_POST['sample_dimensi_b'] ?? '') ?>">
                             </div>
                             <div class="col-sm-4 mb-3 d-none" id="spDimH">
                                 <label class="form-label" style="font-size:0.8rem;">Dimensi h (Cm)</label>
-                                <input type="number" step="0.01" name="sample_dimensi_h" class="form-control form-control-sm" placeholder="Dimensi h">
+                                <input type="number" step="0.01" name="sample_dimensi_h" class="form-control form-control-sm" placeholder="Dimensi h" value="<?= htmlspecialchars($_POST['sample_dimensi_h'] ?? '') ?>">
                             </div>
                         </div>
                         <div class="row">
                             <div class="col-sm-4 mb-3 d-none" id="spJenisBaja">
                                 <label class="form-label" style="font-size:0.8rem;">Jenis Baja</label>
+                                <?php $valBaja = $_POST['sample_jenis_baja'] ?? ''; ?>
                                 <select name="sample_jenis_baja" class="form-select form-select-sm">
                                     <option value="">-- Pilih --</option>
-                                    <option value="Polos">Polos</option>
-                                    <option value="Ulir">Ulir</option>
+                                    <option value="Polos"<?= $valBaja==='Polos'?' selected':'' ?>>Polos</option>
+                                    <option value="Ulir"<?= $valBaja==='Ulir'?' selected':'' ?>>Ulir</option>
                                 </select>
                             </div>
                             <div class="col-sm-4 mb-3 d-none" id="spPanjang">
                                 <label class="form-label" style="font-size:0.8rem;">Panjang (cm)</label>
-                                <input type="number" step="0.01" name="sample_panjang" class="form-control form-control-sm" placeholder="Panjang">
+                                <input type="number" step="0.01" name="sample_panjang" class="form-control form-control-sm" placeholder="Panjang" value="<?= htmlspecialchars($_POST['sample_panjang'] ?? '') ?>">
                             </div>
                         </div>
                     </div>
@@ -390,7 +493,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="mb-3 d-none" id="rowTambahanCetak">
                         <label class="form-label">Layanan Tambahan (opsional)</label>
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="tambahan_cetak" id="tambahanCetak" value="1">
+                            <input class="form-check-input" type="checkbox" name="tambahan_cetak" id="tambahanCetak" value="1"<?= !empty($_POST['tambahan_cetak']) ? ' checked' : '' ?>>
                             <label class="form-check-label" for="tambahanCetak">
                                 Pemotongan, Setting &amp; Cetak Benda Uji
                                 <span class="text-danger">+Rp <?= number_format(HARGA_TAMBAHAN_CETAK, 0, ',', '.') ?></span> <span class="text-muted">/ sampel</span>
@@ -401,7 +504,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     <div class="mb-3 d-none" id="rowTambahanSetting">
                         <label class="form-label">Layanan Tambahan (opsional)</label>
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" name="tambahan_setting" id="tambahanSetting" value="1">
+                            <input class="form-check-input" type="checkbox" name="tambahan_setting" id="tambahanSetting" value="1"<?= !empty($_POST['tambahan_setting']) ? ' checked' : '' ?>>
                             <label class="form-check-label" for="tambahanSetting">
                                 Setting Ukuran Baja Tulangan
                                 <span class="text-danger">+Rp <?= number_format(HARGA_TAMBAHAN_SETTING, 0, ',', '.') ?></span> <span class="text-muted">/ sampel</span>
@@ -411,25 +514,31 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Tanggal Pengujian</label>
-                        <input type="date" name="tanggal_pengujian" id="tanggalPengujian" class="form-control bg-light" value="<?= date('Y-m-d') ?>" readonly required>
+                        <input type="date" name="tanggal_pengujian" id="tanggalPengujian" class="form-control bg-light" value="<?= htmlspecialchars($_POST['tanggal_pengujian'] ?? date('Y-m-d')) ?>" readonly required>
                         <small class="text-muted">Tanggal otomatis = hari ini (walk-in)</small>
                         <small id="infoBookingTanggal" class="d-block mt-1"></small>
                     </div>
                     <div class="mb-3">
                         <label class="form-label">Nama Proyek <span class="text-danger">*</span></label>
                         <input type="text" name="objek_pengujian" class="form-control" required
+                               value="<?= htmlspecialchars($_POST['objek_pengujian'] ?? '') ?>"
+                               pattern="[A-Za-z].*" title="Harus diawali dengan huruf"
                                placeholder="Contoh: Gedung Serba Guna, Jembatan Tol">
                         <small class="text-muted">Masukkan nama proyek.</small>
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Lokasi</label>
-                        <input type="text" name="lokasi" class="form-control"
-                               placeholder="Lokasi proyek (opsional)">
+                        <label class="form-label">Lokasi <span class="text-danger">*</span></label>
+                        <input type="text" name="lokasi" class="form-control" required
+                               value="<?= htmlspecialchars($_POST['lokasi'] ?? '') ?>"
+                               pattern="[A-Za-z].*" title="Harus diawali dengan huruf"
+                               placeholder="Lokasi proyek">
                     </div>
                     <div class="mb-3">
-                        <label class="form-label">Supplier</label>
-                        <input type="text" name="supplier" class="form-control"
-                               placeholder="Nama supplier material (opsional)">
+                        <label class="form-label">Supplier <span class="text-danger">*</span></label>
+                        <input type="text" name="supplier" class="form-control" required
+                               value="<?= htmlspecialchars($_POST['supplier'] ?? '') ?>"
+                               pattern="[A-Za-z].*" title="Harus diawali dengan huruf"
+                               placeholder="Nama supplier material">
                     </div>
                 </div>
             </div>
@@ -573,7 +682,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             // Spesifikasi Sampel — tampilkan field sesuai tipe
             const spWrap = document.getElementById('spesifikasiSampel');
             if (spWrap) {
-                const adaSpesifikasi = (tipe !== '');
+                const adaSpesifikasi = (tipe !== '' || kategori === 'besi');
                 spWrap.classList.toggle('d-none', !adaSpesifikasi);
             }
             // Reset semua kolom dulu
@@ -614,6 +723,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 if (lblDiameter) lblDiameter.textContent = 'Diameter (mm)';
             }
 
+            ['spBerat','spDiameter','spTinggi','spBentang','spDimB','spDimH','spJenisBaja','spPanjang'].forEach(function(id) {
+                var kolom = document.getElementById(id);
+                if (!kolom) return;
+                var terlihat = !kolom.classList.contains('d-none');
+                kolom.querySelectorAll('input, select').forEach(function(inp) {
+                    if (terlihat) { inp.setAttribute('required', 'required'); }
+                    else { inp.removeAttribute('required'); }
+                });
+            });
+
             const rowCetak = document.getElementById('rowTambahanCetak');
             const bisaCetak = !!(opsi && opsi.dataset.tambahan === 'cetak');
             if (rowCetak) {
@@ -647,6 +766,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             fetch('../api/jumlah_booking.php?tanggal=' + tanggal)
                 .then(r => r.json())
                 .then(data => {
+                    if (typeof data.total !== 'number') { info.textContent = ''; return; }
                     if (data.total === 0) {
                         info.innerHTML = '<i class="bi bi-check-circle text-success"></i> Tanggal ini masih kosong, belum ada booking.';
                         info.className = 'd-block mt-1 text-success';
@@ -696,6 +816,94 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         selectPelanggan.addEventListener('change', togglePelanggan);
         togglePelanggan();
+
+        // === Validasi: semua isian wajib harus terisi, tampilkan notif jika kosong ===
+        function getRequiredVisible() {
+            const fields = [];
+            document.querySelectorAll('#formWalkin [required]').forEach(function(el) {
+                if (el.offsetParent === null) return;
+                if (el.closest('.d-none')) return;
+                fields.push(el);
+            });
+            return fields;
+        }
+
+        function updateIsiInfo() {
+            const fields = getRequiredVisible();
+            let terisi = 0;
+            fields.forEach(function(el) {
+                const v = (el.value || '').trim();
+                if (v !== '' && v !== '0') terisi++;
+            });
+            let box = document.getElementById('isiInfoBox');
+            if (!box) {
+                box = document.createElement('div');
+                box.id = 'isiInfoBox';
+                box.className = 'isi-info';
+                document.body.appendChild(box);
+            }
+            const total = fields.length;
+            const kurang = total - terisi;
+            if (kurang === 0 && total > 0) {
+                box.innerHTML = '<div class="alert alert-success py-2 px-3 shadow-sm mb-0" style="font-size:0.85rem;"><i class="bi bi-check-circle-fill"></i> Semua data wajib sudah terisi. Klik <strong>Buat Booking</strong>.</div>';
+            } else if (total > 0) {
+                box.innerHTML = '<div class="alert alert-warning py-2 px-3 shadow-sm mb-0" style="font-size:0.85rem;"><i class="bi bi-exclamation-triangle-fill"></i> Masih ada <strong>' + kurang + '</strong> isian wajib yang kosong.</div>';
+            } else {
+                box.innerHTML = '';
+            }
+        }
+
+        function pasangListenerIsi() {
+            document.querySelectorAll('#formWalkin [required]').forEach(function(el) {
+                if (el.dataset.listenerIsi) return;
+                el.dataset.listenerIsi = '1';
+                el.addEventListener('input', function() {
+                    this.classList.remove('is-invalid-custom');
+                    updateIsiInfo();
+                });
+                el.addEventListener('change', function() {
+                    this.classList.remove('is-invalid-custom');
+                    updateIsiInfo();
+                });
+            });
+        }
+        cekMinSampel();
+        pasangListenerIsi();
+        document.getElementById('jenisPengujian').addEventListener('change', function() {
+            pasangListenerIsi();
+            updateIsiInfo();
+        });
+        selectPelanggan.addEventListener('change', function() {
+            pasangListenerIsi();
+            updateIsiInfo();
+        });
+        updateIsiInfo();
+
+        document.getElementById('formWalkin').addEventListener('submit', function(ev) {
+            const fields = getRequiredVisible();
+            let kosong = [];
+            fields.forEach(function(el) {
+                const v = (el.value || '').trim();
+                if (v === '' || v === '0') {
+                    el.classList.add('is-invalid-custom');
+                    kosong.push(el);
+                } else {
+                    el.classList.remove('is-invalid-custom');
+                }
+            });
+            if (kosong.length > 0) {
+                ev.preventDefault();
+                kosong[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+                kosong[0].classList.add('shake-err');
+                setTimeout(function() { kosong[0].classList.remove('shake-err'); }, 400);
+                kosong[0].focus({ preventScroll: true });
+                updateIsiInfo();
+                return false;
+            }
+            const tombol = this.querySelector('[type="submit"]');
+            tombol.disabled = true;
+            tombol.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Menyimpan...';
+        });
 
         hitungEstimasi();
         cekJumlahBooking(document.getElementById('tanggalPengujian').value);

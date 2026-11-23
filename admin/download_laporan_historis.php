@@ -166,8 +166,8 @@ $qrApiUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=90x90&data=' . url
                     </tr>
                     <?php if (!$isBesi): ?>
                     <tr>
-                        <td style="font-weight:600; padding:2px 0;">MUTU BETON</td>
-                        <td style="padding:2px 0;">: <?= htmlspecialchars($first['mutu_beton'] ?? '-') ?></td>
+                        <td style="font-weight:600; padding:2px 0;">MUTU</td>
+                        <td style="padding:2px 0;">: <?= htmlspecialchars($first['mutu_beton'] ?? '-') ?> kg/cm&sup2;</td>
                     </tr>
                     <?php endif; ?>
                 </table>
